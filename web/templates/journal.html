@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ journal.name }} — 學術期刊摘要系統{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="breadcrumb">
+    <a href="/">儀表板</a> &rsaquo; <span>{{ journal.name }}</span>
+  </div>
+  <h1>{{ journal.name }}</h1>
+  <p class="subtitle">ISSN: {{ journal.issn }} &middot; {{ journal.publisher | upper }}</p>
+</div>
+
+<!-- Filter bar -->
+<div class="card filter-bar">
+  <div class="filter-row">
+    <div class="filter-group">
+      <input type="text" id="search-input" placeholder="搜尋文章標題或作者..."
+             onkeyup="filterArticles()">
+    </div>
+    <div class="filter-group">
+      <select id="filter-status" onchange="filterArticles()">
+        <option value="all">全部文章</option>
+        <option value="summarized">已有摘要</option>
+        <option value="downloaded">已下載 PDF</option>
+        <option value="pending">尚未處理</option>
+      </select>
+    </div>
+    <div class="filter-stats">
+      共 <strong>{{ articles | length }}</strong> 篇文章
+    </div>
+  </div>
+</div>
+
+<!-- Article list -->
+<div class="article-list" id="article-list">
+  {% for a in articles %}
+  <div class="card article-row"
+       data-title="{{ a.title | lower }}"
+       data-authors="{{ a.authors | join(', ') | lower }}"
+       data-status="{% if a.has_summary %}summarized{% elif a.has_pdf %}downloaded{% else %}pending{% endif %}">
+
+    <div class="article-row-main">
+      <div class="article-info">
+        <h3 class="article-title">
+          <a href="/article/{{ journal_key }}/{{ a.doi_suffix }}">{{ a.title }}</a>
+        </h3>
+        <p class="article-authors">{{ a.authors | join(', ') }}</p>
+        <div class="article-meta">
+          {% if a.volume %}
+          <span class="meta-tag">Vol. {{ a.volume }}{% if a.issue %}, No. {{ a.issue }}{% endif %}</span>
+          {% endif %}
+          {% if a.pages %}
+          <span class="meta-tag">pp. {{ a.pages }}</span>
+          {% endif %}
+          {% if a.publication_date %}
+          <span class="meta-tag">{{ a.publication_date }}</span>
+          {% endif %}
+          {% if a.doi %}
+          <span class="meta-tag doi">{{ a.doi }}</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="article-status">
+        {% if a.has_summary %}
+        <span class="status-badge status-done" title="摘要完成">已摘要</span>
+        {% elif a.has_pdf %}
+        <span class="status-badge status-pdf" title="PDF 已下載">已下載</span>
+        {% else %}
+        <span class="status-badge status-pending" title="尚未處理">待處理</span>
+        {% endif %}
+
+        {% if a.has_summary %}
+        <a href="/article/{{ journal_key }}/{{ a.doi_suffix }}" class="btn btn-sm btn-primary">
+          查看摘要
+        </a>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if a.abstract %}
+    <details class="article-abstract">
+      <summary>摘要預覽</summary>
+      <p>{{ a.abstract[:400] }}{% if a.abstract | length > 400 %}...{% endif %}</p>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if not articles %}
+  <div class="empty-state">
+    <p>尚未抓取任何文章。請回到<a href="/">儀表板</a>執行抓取任務。</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterArticles() {
+  const query = document.getElementById('search-input').value.toLowerCase();
+  const status = document.getElementById('filter-status').value;
+  const rows = document.querySelectorAll('.article-row');
+
+  rows.forEach(row => {
+    const title = row.dataset.title || '';
+    const authors = row.dataset.authors || '';
+    const rowStatus = row.dataset.status || '';
+
+    const matchText = !query || title.includes(query) || authors.includes(query);
+    const matchStatus = status === 'all' || rowStatus === status;
+
+    row.style.display = (matchText && matchStatus) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}儀表板 — 學術期刊摘要系統{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>儀表板</h1>
+  <p class="subtitle">管理期刊抓取與摘要任務</p>
+</div>
+
+<!-- Pipeline Control Panel -->
+<section class="card control-panel" id="control-panel">
+  <h2>執行抓取任務</h2>
+  <div class="control-row">
+    <div class="control-group">
+      <label for="sel-journal">期刊</label>
+      <select id="sel-journal">
+        {% for j in journals %}
+        <option value="{{ j.key }}">{{ j.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="control-group">
+      <label for="sel-backend">摘要方式</label>
+      <select id="sel-backend">
+        <option value="claude">Claude API（高品質）</option>
+        <option value="local">本地規則（免 API Key）</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label for="sel-lang">語言</label>
+      <select id="sel-lang">
+        <option value="zh">繁體中文</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <div class="control-group control-group--btn">
+      <button id="btn-run" class="btn btn-primary" onclick="startPipeline()">
+        開始抓取
+      </button>
+    </div>
+  </div>
+
+  <!-- Progress bar (hidden until running) -->
+  <div id="progress-section" class="progress-section hidden">
+    <div class="progress-header">
+      <span id="progress-phase" class="phase-tag">準備中</span>
+      <span id="progress-detail"></span>
+    </div>
+    <div class="progress-bar-track">
+      <div id="progress-bar" class="progress-bar-fill" style="width: 0%"></div>
+    </div>
+    <div id="progress-log" class="progress-log"></div>
+  </div>
+</section>
+
+<!-- Journal Cards -->
+<section class="journal-grid">
+  {% for j in journals %}
+  <a href="/journal/{{ j.key }}" class="card journal-card">
+    <div class="journal-card-header">
+      <h3>{{ j.name }}</h3>
+      <span class="publisher-badge">{{ j.publisher | upper }}</span>
+    </div>
+    <p class="journal-issn">ISSN: {{ j.issn }}</p>
+    <div class="journal-stats">
+      <div class="stat">
+        <span class="stat-number">{{ j.article_count }}</span>
+        <span class="stat-label">篇文章</span>
+      </div>
+      <div class="stat">
+        <span class="stat-number">{{ j.pdf_count }}</span>
+        <span class="stat-label">PDF 已下載</span>
+      </div>
+      <div class="stat">
+        <span class="stat-number">{{ j.summary_count }}</span>
+        <span class="stat-label">摘要完成</span>
+      </div>
+    </div>
+    {% if j.article_count > 0 %}
+    <div class="journal-bar">
+      <div class="journal-bar-fill" style="width: {{ (j.summary_count / j.article_count * 100) | int }}%"></div>
+    </div>
+    {% endif %}
+  </a>
+  {% endfor %}
+
+  {% if not journals %}
+  <div class="empty-state">
+    <p>尚未設定任何期刊。請在 <code>config.py</code> 中新增期刊設定。</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
