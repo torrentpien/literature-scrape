@@ -12,9 +12,10 @@ venv/
 # Environment
 .env
 
-# Output (PDFs and summaries can be large)
+# Output (PDFs, summaries, metadata)
 output/pdfs/
 output/summaries/
+output/*.json
 
 # Logs
 logs/
