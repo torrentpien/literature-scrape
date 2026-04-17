@@ -30,6 +30,7 @@ JOURNALS = {
         "pdf_base_url": "https://journals.sagepub.com/doi/pdf/{doi}",
         "landing_url": "https://journals.sagepub.com/doi/{doi}",
         "toc_url": "https://journals.sagepub.com/toc/asra/current",
+        "rss_url": "https://journals.sagepub.com/action/showFeed?jc=asra&type=etoc&feed=rss2_0",
     },
     # Add more journals here, e.g.:
     # "ajs": {
@@ -39,6 +40,7 @@ JOURNALS = {
     #     "pdf_base_url": "https://www.journals.uchicago.edu/doi/pdf/{doi}",
     #     "landing_url": "https://www.journals.uchicago.edu/doi/{doi}",
     #     "toc_url": "https://www.journals.uchicago.edu/toc/ajs/current",
+    #     "rss_url": "https://www.journals.uchicago.edu/action/showFeed?jc=ajs&type=etoc&feed=rss",
     # },
 }
 

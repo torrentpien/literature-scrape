@@ -203,6 +203,179 @@ def fetch_articles_openalex(issn: str, per_page: int = 20) -> list[Article]:
     return articles
 
 
+def fetch_articles_rss(journal_key: str) -> list[Article]:
+    """
+    Fetch articles from the journal's RSS feed.
+
+    RSS is the most reliable source for SAGE because:
+    - Designed for automated consumption (less aggressive blocking)
+    - Well-structured XML format
+    - Updated when new issues are published
+    - Bypasses Cloudflare challenges that affect TOC scraping
+    """
+    journal = JOURNALS.get(journal_key)
+    if not journal:
+        logger.error(f"Unknown journal key: {journal_key}")
+        return []
+
+    rss_url = journal.get("rss_url")
+    if not rss_url:
+        logger.info(f"No RSS URL configured for {journal_key}")
+        return []
+
+    logger.info(f"Fetching RSS: {rss_url}")
+    try:
+        # RSS feeds often benefit from a plain User-Agent
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; LiteratureScraper/1.0)"}
+        resp = requests.get(rss_url, headers=headers, timeout=REQUEST_TIMEOUT)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        logger.error(f"RSS fetch failed: {e}")
+        return []
+
+    # Parse RSS XML using lxml
+    try:
+        from lxml import etree
+        # RSS feeds may declare encoding in XML prolog; pass bytes
+        root = etree.fromstring(resp.content)
+    except Exception as e:
+        logger.error(f"RSS parse failed: {e}")
+        return []
+
+    # Collect namespace map (RSS uses dc:, content:, prism:, etc.)
+    nsmap = {
+        "dc": "http://purl.org/dc/elements/1.1/",
+        "content": "http://purl.org/rss/1.0/modules/content/",
+        "prism": "http://prismstandard.org/namespaces/basic/2.0/",
+        "atom": "http://www.w3.org/2005/Atom",
+    }
+
+    # Handle both RSS 2.0 (<item>) and Atom (<entry>)
+    items = root.findall(".//item")
+    if not items:
+        items = root.findall(".//atom:entry", nsmap)
+
+    articles = []
+    for item in items:
+        title = _xml_text(item, "title") or _xml_text(item, "atom:title", nsmap) or "Untitled"
+        link = _xml_text(item, "link") or ""
+        if not link:
+            # Atom uses <link href="..."/>
+            link_el = item.find("atom:link", nsmap)
+            if link_el is not None:
+                link = link_el.get("href", "")
+
+        # DOI extraction from various fields
+        doi = (
+            _xml_text(item, "prism:doi", nsmap) or
+            _xml_text(item, "dc:identifier", nsmap) or
+            ""
+        )
+        # Sometimes DOI is embedded in the link URL
+        if not doi and link:
+            m = re.search(r'(?:doi/(?:abs/|full/|pdf/)?|doi\.org/)(10\.\d+/[^?\s&#]+)', link)
+            if m:
+                doi = m.group(1)
+
+        # Clean "doi:" prefix if present
+        doi = re.sub(r'^doi:\s*', '', doi).strip()
+
+        # Authors: RSS often uses <dc:creator> (can repeat)
+        authors: list[str] = []
+        for creator in item.findall("dc:creator", nsmap):
+            if creator.text:
+                # Some feeds cram all authors in one creator tag separated by ";" or ","
+                names = re.split(r'[,;]\s+|\s+and\s+', creator.text.strip())
+                authors.extend(n.strip() for n in names if n.strip())
+        # Also try <author>
+        if not authors:
+            for au in item.findall("author"):
+                if au.text:
+                    authors.append(au.text.strip())
+        # Atom <atom:author><atom:name>
+        if not authors:
+            for au in item.findall("atom:author/atom:name", nsmap):
+                if au.text:
+                    authors.append(au.text.strip())
+
+        # Description / abstract
+        description = (
+            _xml_text(item, "description") or
+            _xml_text(item, "content:encoded", nsmap) or
+            _xml_text(item, "atom:summary", nsmap) or
+            ""
+        )
+        # Strip HTML if present
+        if description and ("<" in description):
+            description = BeautifulSoup(description, "lxml").get_text(" ", strip=True)
+
+        # Publication date
+        pub_date = (
+            _xml_text(item, "pubDate") or
+            _xml_text(item, "dc:date", nsmap) or
+            _xml_text(item, "prism:publicationDate", nsmap) or
+            _xml_text(item, "atom:published", nsmap) or
+            ""
+        )
+        # Normalize common RSS date formats to YYYY-MM-DD
+        pub_date = _normalize_date(pub_date)
+
+        # Volume / issue (PRISM namespace, if present)
+        volume = _xml_text(item, "prism:volume", nsmap) or ""
+        issue = _xml_text(item, "prism:number", nsmap) or ""
+
+        # Build URLs
+        pdf_url = ""
+        landing_url = link
+        if doi:
+            pdf_url = journal["pdf_base_url"].format(doi=doi)
+            landing_url = journal["landing_url"].format(doi=doi)
+
+        articles.append(Article(
+            title=title.strip(),
+            authors=authors,
+            doi=doi,
+            journal=journal["issn"],
+            volume=volume,
+            issue=issue,
+            publication_date=pub_date,
+            abstract=description,
+            pdf_url=pdf_url,
+            landing_url=landing_url,
+        ))
+
+    logger.info(f"RSS returned {len(articles)} articles")
+    return articles
+
+
+def _xml_text(element, path: str, nsmap: dict | None = None) -> str:
+    """Safely extract text from an XML element by XPath-like path."""
+    try:
+        el = element.find(path, nsmap) if nsmap else element.find(path)
+        if el is not None and el.text:
+            return el.text.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _normalize_date(date_str: str) -> str:
+    """Normalize various date formats to YYYY-MM-DD."""
+    if not date_str:
+        return ""
+    # Already ISO format
+    if re.match(r'^\d{4}-\d{2}-\d{2}', date_str):
+        return date_str[:10]
+    # RFC 822: "Mon, 15 May 2023 00:00:00 GMT"
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(date_str)
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    return date_str
+
+
 def scrape_sage_toc(journal_key: str) -> list[Article]:
     """Scrape SAGE table-of-contents page directly for article links."""
     journal = JOURNALS.get(journal_key)
@@ -293,37 +466,45 @@ def fetch_latest_issue(journal_key: str, max_articles: int = 20) -> list[Article
     issn = journal["issn"]
     all_articles: dict[str, Article] = {}
 
-    # Strategy 1: CrossRef
-    for article in fetch_articles_crossref(issn, rows=max_articles):
-        if article.doi:
+    def _merge(article: Article):
+        """Add or merge an article into the dict (preserves richer data)."""
+        if not article.doi:
+            return
+        if article.doi not in all_articles:
             all_articles[article.doi] = article
+            return
+        existing = all_articles[article.doi]
+        # Fill in gaps from the new article
+        for field_name in ("pdf_url", "landing_url", "abstract",
+                           "volume", "issue", "pages", "publication_date"):
+            if not getattr(existing, field_name) and getattr(article, field_name):
+                setattr(existing, field_name, getattr(article, field_name))
+        # Merge authors if existing has none
+        if not existing.authors and article.authors:
+            existing.authors = article.authors
 
+    # Strategy 1: RSS (highest priority for publishers that provide it)
+    # RSS is the most reliable and up-to-date source for new issues.
+    if journal.get("rss_url"):
+        for article in fetch_articles_rss(journal_key):
+            _merge(article)
+        time.sleep(1)
+
+    # Strategy 2: CrossRef (authoritative bibliographic metadata)
+    for article in fetch_articles_crossref(issn, rows=max_articles):
+        _merge(article)
     time.sleep(1)
 
-    # Strategy 2: OpenAlex (may provide PDF URLs)
+    # Strategy 3: OpenAlex (richer metadata, may provide OA PDF URLs)
     for article in fetch_articles_openalex(issn, per_page=max_articles):
-        if article.doi and article.doi in all_articles:
-            # Merge: keep richer data
-            existing = all_articles[article.doi]
-            if not existing.pdf_url and article.pdf_url:
-                existing.pdf_url = article.pdf_url
-            if not existing.landing_url and article.landing_url:
-                existing.landing_url = article.landing_url
-            if not existing.abstract and article.abstract:
-                existing.abstract = article.abstract
-        elif article.doi:
-            all_articles[article.doi] = article
+        _merge(article)
 
-    # Strategy 3: SAGE TOC scraping (fills in gaps)
-    if journal.get("publisher") == "sage":
+    # Strategy 4: SAGE TOC scraping (last resort, fills remaining gaps)
+    if journal.get("publisher") == "sage" and len(all_articles) < 3:
         time.sleep(1)
+        logger.info("Few articles found; trying SAGE TOC scraping as fallback")
         for article in scrape_sage_toc(journal_key):
-            if article.doi and article.doi not in all_articles:
-                all_articles[article.doi] = article
-            elif article.doi and article.doi in all_articles:
-                existing = all_articles[article.doi]
-                if not existing.pdf_url and article.pdf_url:
-                    existing.pdf_url = article.pdf_url
+            _merge(article)
 
     # Ensure all articles have PDF URLs constructed from DOI
     for article in all_articles.values():
