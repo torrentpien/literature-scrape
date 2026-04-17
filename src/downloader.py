@@ -33,13 +33,55 @@ def _create_session() -> requests.Session:
     """Create a requests session with appropriate headers for SAGE."""
     session = requests.Session()
     session.headers.update(REQUEST_HEADERS)
-    # SAGE sometimes requires accepting cookies first
     session.headers.update({
-        "Accept": "application/pdf,application/xhtml+xml,text/html,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9,zh-TW;q=0.8",
-        "Referer": "https://journals.sagepub.com/",
     })
     return session
+
+
+def _warm_session(session: requests.Session, landing_url: str) -> None:
+    """
+    Visit the article landing page first to:
+    1. Pick up session cookies
+    2. Establish a referrer chain that SAGE expects
+    3. Pass any Cloudflare checks
+    """
+    if not landing_url:
+        return
+    try:
+        logger.info(f"  Warming session: {landing_url}")
+        resp = session.get(landing_url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
+        logger.info(f"  Landing page: HTTP {resp.status_code}, "
+                     f"cookies={list(session.cookies.keys())}")
+    except requests.RequestException as e:
+        logger.warning(f"  Landing page failed: {e}")
+
+
+def _is_pdf(resp: requests.Response) -> bool:
+    """Check if a response actually contains a PDF."""
+    ct = resp.headers.get("Content-Type", "")
+    return "pdf" in ct or resp.content[:5] == b"%PDF-"
+
+
+def _describe_html(content: bytes) -> str:
+    """Extract a short description from an HTML response for diagnostics."""
+    text = content[:2000].decode("utf-8", errors="replace")
+    # Check for common patterns
+    if "Cloudflare" in text or "cf-browser-verification" in text:
+        return "Cloudflare challenge page"
+    if "Access Denied" in text or "403" in text:
+        return "Access denied page"
+    if "Sign in" in text or "Login" in text or "log in" in text:
+        return "Login / authentication page"
+    if "captcha" in text.lower():
+        return "CAPTCHA challenge"
+    # Try to extract <title>
+    import re
+    title_match = re.search(r'<title[^>]*>([^<]+)</title>', text, re.IGNORECASE)
+    if title_match:
+        return f"HTML page: '{title_match.group(1).strip()[:80]}'"
+    return f"HTML page ({len(content)} bytes)"
 
 
 def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
@@ -62,68 +104,87 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
 
     session = _create_session()
 
+    # Candidate PDF URLs to try (primary, then alternatives)
+    candidate_urls = [pdf_url]
+    if article.doi:
+        direct = _build_sage_pdf_url(article.doi)
+        if direct != pdf_url:
+            candidate_urls.append(direct)
+        # Some SAGE PDFs need /doi/epdf/ instead of /doi/pdf/
+        epdf = f"https://journals.sagepub.com/doi/epdf/{article.doi}"
+        candidate_urls.append(epdf)
+
     for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            logger.info(f"Downloading (attempt {attempt}): {article.title[:60]}...")
-            logger.debug(f"  URL: {pdf_url}")
+        logger.info(f"Download attempt {attempt}/{MAX_RETRIES}: {article.title[:60]}...")
 
-            # First visit the landing page to pick up session cookies
-            if article.landing_url:
-                session.get(article.landing_url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-                time.sleep(1)
+        # Warm session on first attempt (get cookies from landing page)
+        if attempt == 1:
+            _warm_session(session, article.landing_url)
+            time.sleep(1)
 
-            # Download the PDF
-            resp = session.get(pdf_url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-            resp.raise_for_status()
+        for url in candidate_urls:
+            try:
+                logger.info(f"  GET {url}")
 
-            content_type = resp.headers.get("Content-Type", "")
+                # Set Referer to the landing page (SAGE checks this)
+                if article.landing_url:
+                    session.headers["Referer"] = article.landing_url
 
-            # Check if we actually got a PDF
-            if "pdf" in content_type or resp.content[:5] == b"%PDF-":
-                output_path.write_bytes(resp.content)
-                file_size_mb = len(resp.content) / (1024 * 1024)
-                logger.info(f"  Saved: {output_path.name} ({file_size_mb:.1f} MB)")
-                return output_path
+                resp = session.get(url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
 
-            # If we got HTML instead of PDF, likely a login/paywall page
-            if "text/html" in content_type:
-                logger.warning(f"  Got HTML instead of PDF. "
-                             f"Possible paywall - check institutional access.")
-                # Try the direct SAGE PDF URL pattern with /doi/pdf/
-                if "/doi/pdf/" not in pdf_url:
-                    alt_url = _build_sage_pdf_url(article.doi)
-                    logger.info(f"  Trying alternate URL: {alt_url}")
-                    resp2 = session.get(alt_url, timeout=REQUEST_TIMEOUT, allow_redirects=True)
-                    if resp2.content[:5] == b"%PDF-":
-                        output_path.write_bytes(resp2.content)
-                        logger.info(f"  Saved via alternate URL: {output_path.name}")
-                        return output_path
+                ct = resp.headers.get("Content-Type", "unknown")
+                logger.info(f"  -> HTTP {resp.status_code} | {ct} | {len(resp.content)} bytes"
+                             f" | final URL: {resp.url}")
 
-                logger.error(f"  Cannot access PDF (paywall). "
-                           f"Ensure you are on institutional network (e.g., NCCU 140.119.x.x)")
-                return None
+                # Success: got a PDF
+                if _is_pdf(resp):
+                    output_path.write_bytes(resp.content)
+                    size_mb = len(resp.content) / (1024 * 1024)
+                    logger.info(f"  SAVED: {output_path.name} ({size_mb:.1f} MB)")
+                    return output_path
 
-            logger.warning(f"  Unexpected content type: {content_type}")
+                # Got HTML instead of PDF
+                if resp.status_code == 200 and "text/html" in ct:
+                    desc = _describe_html(resp.content)
+                    logger.warning(f"  Got HTML instead of PDF: {desc}")
+                    # Don't try more URLs for auth/paywall issues
+                    if "Login" in desc or "Access denied" in desc:
+                        logger.error(
+                            f"  PAYWALL: Your IP does not have access. "
+                            f"Ensure you are on institutional network (NCCU 140.119.x.x) or VPN."
+                        )
+                        return None
+                    continue  # try next candidate URL
 
-        except requests.exceptions.Timeout:
-            logger.warning(f"  Timeout on attempt {attempt}")
-        except requests.exceptions.HTTPError as e:
-            status = e.response.status_code if e.response else "?"
-            logger.warning(f"  HTTP {status} on attempt {attempt}")
-            if status == 403:
-                logger.error("  Access denied. Check institutional IP access.")
-                return None
-            if status == 429:
-                wait = DOWNLOAD_DELAY * attempt * 2
-                logger.info(f"  Rate limited. Waiting {wait}s...")
-                time.sleep(wait)
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"  Request error on attempt {attempt}: {e}")
+                # HTTP error
+                if resp.status_code == 403:
+                    logger.error(f"  HTTP 403 Forbidden — no institutional access")
+                    return None
 
+                if resp.status_code == 429:
+                    wait = DOWNLOAD_DELAY * attempt * 2
+                    logger.warning(f"  Rate limited (429). Waiting {wait}s...")
+                    time.sleep(wait)
+                    break  # retry outer loop
+
+                if resp.status_code >= 400:
+                    logger.warning(f"  HTTP {resp.status_code} — trying next URL")
+                    continue
+
+            except requests.exceptions.Timeout:
+                logger.warning(f"  Timeout for {url}")
+                continue
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"  Request error: {e}")
+                continue
+
+        # Delay before next attempt
         if attempt < MAX_RETRIES:
-            time.sleep(DOWNLOAD_DELAY * attempt)
+            delay = DOWNLOAD_DELAY * attempt
+            logger.info(f"  Waiting {delay}s before retry...")
+            time.sleep(delay)
 
-    logger.error(f"Failed to download after {MAX_RETRIES} attempts: {article.title[:60]}")
+    logger.error(f"Failed after {MAX_RETRIES} attempts: {article.title[:60]}")
     return None
 
 
@@ -142,9 +203,54 @@ def download_all(articles: list[Article], output_dir: Path = PDF_DIR) -> dict[st
         if path:
             downloaded[article.doi] = path
 
-        # Polite delay between downloads
         if i < total:
             time.sleep(DOWNLOAD_DELAY)
 
     logger.info(f"Downloaded {len(downloaded)}/{total} PDFs")
     return downloaded
+
+
+def check_access() -> dict:
+    """
+    Diagnostic: check if the current IP has institutional access to SAGE.
+    Returns a dict with IP info and access test results.
+    """
+    results = {"ip": "unknown", "sage_access": False, "details": ""}
+
+    # Check our external IP
+    try:
+        r = requests.get("https://httpbin.org/ip", timeout=10)
+        if r.ok:
+            results["ip"] = r.json().get("origin", "unknown")
+    except Exception:
+        try:
+            r = requests.get("https://api.ipify.org?format=json", timeout=10)
+            if r.ok:
+                results["ip"] = r.json().get("ip", "unknown")
+        except Exception:
+            pass
+
+    # Test SAGE access with a known ASR article
+    test_doi = "10.1177/00031224231169050"
+    test_url = f"https://journals.sagepub.com/doi/pdf/{test_doi}"
+    session = _create_session()
+
+    try:
+        # Warm session
+        session.get(f"https://journals.sagepub.com/doi/{test_doi}", timeout=30)
+        time.sleep(1)
+
+        resp = session.get(test_url, timeout=30, allow_redirects=True)
+        ct = resp.headers.get("Content-Type", "")
+
+        if _is_pdf(resp):
+            results["sage_access"] = True
+            results["details"] = f"PDF received ({len(resp.content)} bytes)"
+        elif "text/html" in ct:
+            results["details"] = _describe_html(resp.content)
+        else:
+            results["details"] = f"HTTP {resp.status_code}, Content-Type: {ct}"
+    except Exception as e:
+        results["details"] = f"Request failed: {e}"
+
+    return results

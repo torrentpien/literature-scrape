@@ -280,6 +280,70 @@ def cmd_debug_rss(args):
         print(f"  ... and {len(articles) - 5} more")
 
 
+def cmd_debug_download(args):
+    """Test PDF download access: check IP, test SAGE, and try one article."""
+    from src.downloader import check_access
+
+    print(f"\n{'='*70}")
+    print(f"  PDF Download Diagnostics")
+    print(f"{'='*70}\n")
+
+    # Step 1: Check IP and SAGE access
+    print("[1/2] Checking network access...")
+    result = check_access()
+    print(f"  Your IP:     {result['ip']}")
+
+    ip = result["ip"]
+    if ip.startswith("140.119."):
+        print(f"  Network:     NCCU campus (should have SAGE access)")
+    else:
+        print(f"  Network:     NOT on NCCU campus")
+        print(f"               If you need access, connect via NCCU VPN or campus WiFi")
+
+    print(f"  SAGE access: {'YES' if result['sage_access'] else 'NO'}")
+    print(f"  Details:     {result['details']}")
+    print()
+
+    # Step 2: Try downloading the first available article
+    print("[2/2] Trying to download one article...")
+    meta_path = OUTPUT_DIR / f"{args.journal}_metadata.json"
+    articles_data = []
+    if meta_path.exists():
+        import json
+        try:
+            articles_data = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    if not articles_data:
+        print("  No article metadata found. Run 'python main.py list -j asr' first.")
+        return
+
+    from src.scraper import Article
+    a = articles_data[0]
+    article = Article(
+        title=a["title"],
+        authors=a.get("authors", []),
+        doi=a["doi"],
+        journal=a.get("journal", ""),
+        pdf_url=a.get("pdf_url", ""),
+        landing_url=a.get("landing_url", ""),
+    )
+    print(f"  Article: {article.title[:60]}")
+    print(f"  DOI:     {article.doi}")
+    print(f"  PDF URL: {article.pdf_url}")
+    print()
+
+    import tempfile
+    from src.downloader import download_pdf
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = download_pdf(article, output_dir=Path(tmpdir))
+        if path:
+            print(f"\n  SUCCESS: Downloaded {path.name} ({path.stat().st_size / 1024:.0f} KB)")
+        else:
+            print(f"\n  FAILED: Could not download PDF")
+            print(f"  Check the log output above for details.")
+
+
 def cmd_schedule(args):
     journal_key = args.journal
     interval = args.interval or SCHEDULE_INTERVAL_HOURS
@@ -374,6 +438,12 @@ def main():
     p_rss = subparsers.add_parser("debug-rss", help="Diagnose RSS feed fetching")
     p_rss.add_argument("-j", "--journal", required=True, choices=JOURNALS.keys())
     p_rss.set_defaults(func=cmd_debug_rss)
+
+    # debug-download
+    p_dd = subparsers.add_parser("debug-download",
+                                  help="Test PDF download access (check IP & SAGE connection)")
+    p_dd.add_argument("-j", "--journal", required=True, choices=JOURNALS.keys())
+    p_dd.set_defaults(func=cmd_debug_download)
 
     args = parser.parse_args()
     setup_logging(verbose=getattr(args, "verbose", False))
