@@ -30,7 +30,13 @@ JOURNALS = {
         "pdf_base_url": "https://journals.sagepub.com/doi/pdf/{doi}",
         "landing_url": "https://journals.sagepub.com/doi/{doi}",
         "toc_url": "https://journals.sagepub.com/toc/asra/current",
-        "rss_url": "https://journals.sagepub.com/action/showFeed?jc=asra&type=etoc&feed=rss2_0",
+        # SAGE provides several RSS feed URLs; we try them in order.
+        # The correct format uses underscores (rss_2_0) not rss2_0.
+        "rss_urls": [
+            "https://journals.sagepub.com/action/showFeed?jc=asra&type=etoc&feed=rss_2_0",
+            "https://journals.sagepub.com/action/showFeed?jc=asra&type=etoc&feed=rss_1_0",
+            "https://journals.sagepub.com/action/showFeed?ui=0&mi=ehikzz&ai=2b4&jc=asra&type=etoc&feed=rss_2_0",
+        ],
     },
     # Add more journals here, e.g.:
     # "ajs": {

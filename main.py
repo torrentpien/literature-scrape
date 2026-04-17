@@ -202,6 +202,67 @@ def cmd_download(args):
     )
 
 
+def cmd_debug_rss(args):
+    """Test each configured RSS URL and report what was received."""
+    import requests
+    from config import JOURNALS, REQUEST_TIMEOUT
+    from src.scraper import fetch_articles_rss
+
+    journal = JOURNALS.get(args.journal)
+    if not journal:
+        print(f"Unknown journal: {args.journal}")
+        return
+
+    urls = journal.get("rss_urls") or [journal.get("rss_url")]
+    urls = [u for u in urls if u]
+
+    if not urls:
+        print("No RSS URLs configured.")
+        return
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.5",
+    }
+
+    print(f"\n{'='*70}")
+    print(f"  RSS Diagnostics — {journal['name']}")
+    print(f"{'='*70}\n")
+
+    for i, url in enumerate(urls, 1):
+        print(f"[{i}/{len(urls)}] GET {url}")
+        try:
+            r = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+            print(f"    HTTP {r.status_code}")
+            print(f"    Content-Type: {r.headers.get('Content-Type', '?')}")
+            print(f"    Size: {len(r.content)} bytes")
+            snippet = r.content[:300].decode("utf-8", errors="replace")
+            print(f"    First 300 chars:")
+            print(f"    {snippet!r}")
+        except requests.RequestException as e:
+            print(f"    REQUEST FAILED: {e}")
+        print()
+
+    # Now try the full parser
+    print("─" * 70)
+    print("Running full RSS fetcher (with multi-URL fallback)...")
+    print("─" * 70)
+    articles = fetch_articles_rss(args.journal)
+    print(f"\nResult: {len(articles)} articles parsed\n")
+    for i, a in enumerate(articles[:5], 1):
+        print(f"  {i}. {a.title[:70]}")
+        print(f"     DOI: {a.doi}")
+        print(f"     Authors: {', '.join(a.authors[:3])}")
+        print(f"     Vol/Issue: {a.volume}/{a.issue} — {a.publication_date}")
+        print()
+    if len(articles) > 5:
+        print(f"  ... and {len(articles) - 5} more")
+
+
 def cmd_schedule(args):
     journal_key = args.journal
     interval = args.interval or SCHEDULE_INTERVAL_HOURS
@@ -238,7 +299,11 @@ def cmd_journals(args):
     for key, info in JOURNALS.items():
         print(f"  {key:10s}  {info['name']}")
         print(f"             ISSN: {info['issn']} | Publisher: {info['publisher']}")
-        print(f"             TOC:  {info['toc_url']}")
+        if info.get("toc_url"):
+            print(f"             TOC:  {info['toc_url']}")
+        rss = info.get("rss_urls") or ([info["rss_url"]] if info.get("rss_url") else [])
+        for u in rss:
+            print(f"             RSS:  {u}")
         print()
 
 
@@ -287,6 +352,11 @@ def main():
     # journals
     p_journals = subparsers.add_parser("journals", help="List configured journals")
     p_journals.set_defaults(func=cmd_journals)
+
+    # debug-rss
+    p_rss = subparsers.add_parser("debug-rss", help="Diagnose RSS feed fetching")
+    p_rss.add_argument("-j", "--journal", required=True, choices=JOURNALS.keys())
+    p_rss.set_defaults(func=cmd_debug_rss)
 
     args = parser.parse_args()
     setup_logging(verbose=getattr(args, "verbose", False))
