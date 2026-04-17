@@ -300,9 +300,17 @@ def cmd_debug_download(args):
         print(f"  Network:     NOT on NCCU campus")
         print(f"               If you need access, connect via NCCU VPN or campus WiFi")
 
+    has_cffi = result.get("curl_cffi", False)
+    print(f"  curl_cffi:   {'installed (Cloudflare bypass enabled)' if has_cffi else 'NOT installed — install with: pip install curl_cffi'}")
     print(f"  SAGE access: {'YES' if result['sage_access'] else 'NO'}")
     print(f"  Details:     {result['details']}")
     print()
+
+    if not has_cffi:
+        print("  IMPORTANT: SAGE uses Cloudflare to block bots. Without curl_cffi,")
+        print("             downloads will fail even on campus IPs.")
+        print("             Run: pip install curl_cffi")
+        print()
 
     # Step 2: Try downloading the first available article
     print("[2/2] Trying to download one article...")

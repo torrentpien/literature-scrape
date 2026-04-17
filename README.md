@@ -77,9 +77,22 @@ Web UI 功能：
 
 ## 使用說明
 
-### 校園 IP 存取
+### 校園 IP 存取與 Cloudflare
 
-下載付費期刊 PDF 需要透過有訂閱權限的校園網路。在政治大學校園內（IP: 140.119.x.x）或透過 VPN 連線即可。
+下載付費期刊 PDF 需要兩個條件：
+
+1. **有訂閱權限的校園網路**：政治大學校園內（IP: 140.119.x.x）或透過 VPN 連線
+2. **繞過 Cloudflare 機器人檢查**：SAGE 用 Cloudflare 擋 Python 爬蟲，需要 `curl_cffi`（模擬 Chrome 的 TLS 指紋）
+
+```bash
+pip install curl_cffi
+```
+
+如果 `curl_cffi` 未安裝，下載會失敗並出現「Just a moment...」頁面。可用以下指令診斷：
+
+```bash
+python main.py debug-download -j asr
+```
 
 ### 摘要後端
 
