@@ -65,24 +65,41 @@ def load_metadata(journal_key: str) -> list[dict]:
     path = OUTPUT_DIR / f"{journal_key}_metadata.json"
     if not path.exists():
         return []
-    return json.loads(path.read_text())
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            return []
+        return json.loads(text)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        logger.warning(f"Failed to parse metadata: {path}")
+        return []
 
 
 def load_summary(journal_key: str, doi_suffix: str) -> dict | None:
     """Load a single article summary."""
     json_path = SUMMARY_DIR / journal_key / f"{doi_suffix}.json"
-    if json_path.exists():
-        return json.loads(json_path.read_text())
-    return None
+    if not json_path.exists():
+        return None
+    try:
+        text = json_path.read_text(encoding="utf-8").strip()
+        if not text:
+            return None
+        return json.loads(text)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        logger.warning(f"Failed to parse summary: {json_path}")
+        return None
 
 
 def load_summary_md(journal_key: str, doi_suffix: str) -> str | None:
     """Load summary as rendered HTML from markdown."""
     md_path = SUMMARY_DIR / journal_key / f"{doi_suffix}.md"
-    if md_path.exists():
-        md_text = md_path.read_text()
+    if not md_path.exists():
+        return None
+    try:
+        md_text = md_path.read_text(encoding="utf-8")
         return markdown.markdown(md_text, extensions=["tables", "fenced_code"])
-    return None
+    except Exception:
+        return None
 
 
 def get_article_status(journal_key: str, doi: str) -> dict:
