@@ -10,6 +10,7 @@
 - **雙語支援**：摘要可產出繁體中文或英文
 - **定時排程**：可設定固定間隔自動抓取
 - **可擴充架構**：輕鬆新增更多期刊
+- **Web UI**：瀏覽器介面，可檢視文章列表、結構化摘要、觸發抓取任務、追蹤進度
 
 ## 目前支援期刊
 
@@ -55,6 +56,24 @@ python main.py schedule -j asr -i 168
 # 查看已設定的期刊
 python main.py journals
 ```
+
+### 4. 啟動 Web UI
+
+```bash
+# 產生測試資料（可選）
+python demo_data.py
+
+# 啟動網頁介面
+python web/app.py
+
+# 瀏覽器打開 http://localhost:5000
+```
+
+Web UI 功能：
+- **儀表板**：總覽所有期刊、文章數量、下載與摘要進度
+- **文章列表**：搜尋/篩選文章，查看下載與摘要狀態
+- **文章詳情**：六大面向結構化摘要，一目瞭然
+- **執行任務**：在瀏覽器中觸發抓取任務，即時追蹤進度
 
 ## 使用說明
 
@@ -116,6 +135,7 @@ JOURNALS = {
 literature-scrape/
 ├── main.py              # CLI 入口與排程
 ├── config.py            # 設定（期刊、API、路徑）
+├── demo_data.py         # 產生測試資料
 ├── requirements.txt     # Python 相依套件
 ├── .env.example         # 環境變數範本
 ├── src/
@@ -123,6 +143,16 @@ literature-scrape/
 │   ├── downloader.py    # PDF 下載器
 │   ├── extractor.py     # PDF 文字擷取與段落辨識
 │   └── summarizer.py    # 摘要產生（Claude API / 本地）
+├── web/
+│   ├── app.py           # Flask Web UI
+│   ├── templates/       # HTML 模板
+│   │   ├── base.html    #   基底模板（導覽列、頁尾）
+│   │   ├── index.html   #   儀表板
+│   │   ├── journal.html #   期刊文章列表
+│   │   └── article.html #   文章詳情與摘要
+│   └── static/
+│       ├── css/style.css  # 樣式
+│       └── js/app.js      # 前端互動
 ├── output/
 │   ├── pdfs/            # 下載的 PDF
 │   └── summaries/       # 產生的摘要

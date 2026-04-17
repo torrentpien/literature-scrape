@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}{{ article.title }} — 學術期刊摘要系統{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="breadcrumb">
+    <a href="/">儀表板</a> &rsaquo;
+    <a href="/journal/{{ journal_key }}">{{ journal.name }}</a> &rsaquo;
+    <span>文章詳情</span>
+  </div>
+</div>
+
+<!-- Article header -->
+<section class="card article-detail-header">
+  <h1 class="article-detail-title">{{ article.title }}</h1>
+  <p class="article-detail-authors">{{ article.authors | join(', ') }}</p>
+
+  <div class="article-detail-meta">
+    <div class="meta-grid">
+      <div class="meta-item">
+        <span class="meta-key">期刊</span>
+        <span class="meta-value">{{ journal.name }}</span>
+      </div>
+      {% if article.volume %}
+      <div class="meta-item">
+        <span class="meta-key">卷期</span>
+        <span class="meta-value">Vol. {{ article.volume }}{% if article.issue %}, No. {{ article.issue }}{% endif %}</span>
+      </div>
+      {% endif %}
+      {% if article.pages %}
+      <div class="meta-item">
+        <span class="meta-key">頁碼</span>
+        <span class="meta-value">{{ article.pages }}</span>
+      </div>
+      {% endif %}
+      {% if article.publication_date %}
+      <div class="meta-item">
+        <span class="meta-key">出版日期</span>
+        <span class="meta-value">{{ article.publication_date }}</span>
+      </div>
+      {% endif %}
+      {% if article.doi %}
+      <div class="meta-item">
+        <span class="meta-key">DOI</span>
+        <span class="meta-value">
+          <a href="https://doi.org/{{ article.doi }}" target="_blank" rel="noopener">{{ article.doi }}</a>
+        </span>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="article-detail-badges">
+      {% if status.has_pdf %}
+      <span class="status-badge status-pdf">PDF 已下載</span>
+      {% endif %}
+      {% if status.has_summary %}
+      <span class="status-badge status-done">摘要完成</span>
+      {% endif %}
+      {% if article.landing_url %}
+      <a href="{{ article.landing_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline">
+        原文連結
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if article.abstract %}
+  <div class="article-detail-abstract">
+    <h3>原始摘要 (Abstract)</h3>
+    <p>{{ article.abstract }}</p>
+  </div>
+  {% endif %}
+</section>
+
+<!-- Summary -->
+{% if summary %}
+<section class="card summary-section">
+  <h2>結構化摘要</h2>
+
+  <div class="summary-grid">
+    <div class="summary-block">
+      <div class="summary-block-header">
+        <span class="summary-block-icon">&#x2753;</span>
+        <h3>研究問題</h3>
+      </div>
+      <div class="summary-block-content">
+        {{ summary.research_question or 'N/A' }}
+      </div>
+    </div>
+
+    <div class="summary-block">
+      <div class="summary-block-header">
+        <span class="summary-block-icon">&#x1F4D6;</span>
+        <h3>理論框架</h3>
+      </div>
+      <div class="summary-block-content">
+        {{ summary.theoretical_framework or 'N/A' }}
+      </div>
+    </div>
+
+    <div class="summary-block">
+      <div class="summary-block-header">
+        <span class="summary-block-icon">&#x1F4CA;</span>
+        <h3>資料來源</h3>
+      </div>
+      <div class="summary-block-content">
+        {{ summary.data or 'N/A' }}
+      </div>
+    </div>
+
+    <div class="summary-block">
+      <div class="summary-block-header">
+        <span class="summary-block-icon">&#x1F527;</span>
+        <h3>研究方法</h3>
+      </div>
+      <div class="summary-block-content">
+        {{ summary.methods or 'N/A' }}
+      </div>
+    </div>
+
+    <div class="summary-block">
+      <div class="summary-block-header">
+        <span class="summary-block-icon">&#x2B50;</span>
+        <h3>主要發現</h3>
+      </div>
+      <div class="summary-block-content">
+        {{ summary.key_findings or 'N/A' }}
+      </div>
+    </div>
+
+    <div class="summary-block">
+      <div class="summary-block-header">
+        <span class="summary-block-icon">&#x1F3AF;</span>
+        <h3>學術貢獻</h3>
+      </div>
+      <div class="summary-block-content">
+        {{ summary.contribution or 'N/A' }}
+      </div>
+    </div>
+  </div>
+</section>
+
+{% if summary.raw_summary %}
+<section class="card">
+  <details>
+    <summary><h3 style="display:inline">原始摘要輸出</h3></summary>
+    <div class="raw-summary">
+      {% if summary_html %}
+      {{ summary_html | safe }}
+      {% else %}
+      <pre>{{ summary.raw_summary }}</pre>
+      {% endif %}
+    </div>
+  </details>
+</section>
+{% endif %}
+
+{% else %}
+<section class="card empty-state">
+  <p>尚未產生摘要。請先執行抓取任務以下載 PDF 並產生摘要。</p>
+  <a href="/" class="btn btn-primary">前往儀表板</a>
+</section>
+{% endif %}
+{% endblock %}
