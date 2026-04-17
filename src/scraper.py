@@ -534,7 +534,7 @@ def fetch_latest_issue(journal_key: str, max_articles: int = 20) -> list[Article
 
     # Strategy 1: RSS (highest priority for publishers that provide it)
     # RSS is the most reliable and up-to-date source for new issues.
-    if journal.get("rss_url"):
+    if journal.get("rss_urls") or journal.get("rss_url"):
         for article in fetch_articles_rss(journal_key):
             _merge(article)
         time.sleep(1)
@@ -579,6 +579,6 @@ def save_metadata(articles: list[Article], journal_key: str) -> Path:
     """Save article metadata to JSON."""
     out_path = OUTPUT_DIR / f"{journal_key}_metadata.json"
     data = [asdict(a) for a in articles]
-    out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info(f"Saved metadata to {out_path}")
     return out_path

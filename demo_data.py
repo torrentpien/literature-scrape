@@ -82,7 +82,7 @@ def main():
 
     # Save metadata
     meta_path = OUTPUT_DIR / "asr_metadata.json"
-    meta_path.write_text(json.dumps(DEMO_ARTICLES, ensure_ascii=False, indent=2))
+    meta_path.write_text(json.dumps(DEMO_ARTICLES, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"  Saved: {meta_path}")
 
     # Save one demo summary
@@ -91,7 +91,7 @@ def main():
 
     doi_suffix = DEMO_SUMMARY["doi"].split("/")[-1]
     json_path = summary_dir / f"{doi_suffix}.json"
-    json_path.write_text(json.dumps(DEMO_SUMMARY, ensure_ascii=False, indent=2))
+    json_path.write_text(json.dumps(DEMO_SUMMARY, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"  Saved: {json_path}")
 
     # Save markdown summary
@@ -129,7 +129,7 @@ def main():
 
 {DEMO_SUMMARY['contribution']}
 """
-    md_path.write_text(md_content)
+    md_path.write_text(md_content, encoding="utf-8")
     print(f"  Saved: {md_path}")
 
     # Create a dummy PDF dir
