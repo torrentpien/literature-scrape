@@ -2,7 +2,11 @@
 PDF downloader for academic journals.
 
 Downloads PDFs using institutional IP access (e.g., NCCU 140.119.x.x).
-Handles SAGE-specific redirects, cookies, and access control.
+Handles SAGE-specific redirects, cookies, and Cloudflare bot protection.
+
+SAGE uses Cloudflare's JavaScript challenge which blocks plain `requests`
+even from campus IPs with institutional access. We use `curl_cffi` to
+impersonate Chrome's TLS fingerprint, which passes Cloudflare's check.
 """
 
 import logging
@@ -10,6 +14,14 @@ import time
 from pathlib import Path
 
 import requests
+
+# Try to use curl_cffi for Cloudflare bypass; fall back to requests
+try:
+    from curl_cffi import requests as cffi_requests  # type: ignore
+    HAS_CURL_CFFI = True
+except ImportError:
+    cffi_requests = None
+    HAS_CURL_CFFI = False
 
 from config import (
     DOWNLOAD_DELAY,
@@ -23,14 +35,36 @@ from src.scraper import Article
 
 logger = logging.getLogger(__name__)
 
+# Browser profile to impersonate for Cloudflare-protected sites
+BROWSER_IMPERSONATE = "chrome120"
+
 
 def _build_sage_pdf_url(doi: str) -> str:
     """Build SAGE PDF URL from DOI."""
     return f"https://journals.sagepub.com/doi/pdf/{doi}"
 
 
-def _create_session() -> requests.Session:
-    """Create a requests session with appropriate headers for SAGE."""
+def _create_session():
+    """
+    Create a session that bypasses Cloudflare bot detection.
+
+    Returns a curl_cffi session (impersonating Chrome) if available,
+    otherwise falls back to a regular requests.Session — which will
+    likely fail on Cloudflare-protected sites like SAGE.
+    """
+    if HAS_CURL_CFFI:
+        logger.debug("Using curl_cffi (Chrome impersonation) for Cloudflare bypass")
+        session = cffi_requests.Session(impersonate=BROWSER_IMPERSONATE)
+        session.headers.update({
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,zh-TW;q=0.8",
+        })
+        return session
+
+    logger.warning(
+        "curl_cffi not installed — Cloudflare-protected sites (SAGE) will fail. "
+        "Install it with: pip install curl_cffi"
+    )
     session = requests.Session()
     session.headers.update(REQUEST_HEADERS)
     session.headers.update({
@@ -40,7 +74,7 @@ def _create_session() -> requests.Session:
     return session
 
 
-def _warm_session(session: requests.Session, landing_url: str) -> None:
+def _warm_session(session, landing_url: str) -> None:
     """
     Visit the article landing page first to:
     1. Pick up session cookies
@@ -66,17 +100,27 @@ def _is_pdf(resp: requests.Response) -> bool:
 
 def _describe_html(content: bytes) -> str:
     """Extract a short description from an HTML response for diagnostics."""
-    text = content[:2000].decode("utf-8", errors="replace")
-    # Check for common patterns
-    if "Cloudflare" in text or "cf-browser-verification" in text:
-        return "Cloudflare challenge page"
-    if "Access Denied" in text or "403" in text:
+    text = content[:3000].decode("utf-8", errors="replace")
+
+    # Cloudflare challenge pages (most common SAGE issue)
+    cf_markers = [
+        "Just a moment",
+        "cf-browser-verification",
+        "cf-chl-",
+        "cloudflare",
+        "challenge-platform",
+        "Cloudflare Ray ID",
+    ]
+    if any(m.lower() in text.lower() for m in cf_markers):
+        return "CLOUDFLARE CHALLENGE (install curl_cffi to bypass)"
+
+    if "Access Denied" in text or "access-denied" in text.lower():
         return "Access denied page"
-    if "Sign in" in text or "Login" in text or "log in" in text:
+    if "Sign in" in text or "Login" in text or "log in" in text.lower():
         return "Login / authentication page"
     if "captcha" in text.lower():
         return "CAPTCHA challenge"
-    # Try to extract <title>
+
     import re
     title_match = re.search(r'<title[^>]*>([^<]+)</title>', text, re.IGNORECASE)
     if title_match:
@@ -156,9 +200,16 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
                         return None
                     continue  # try next candidate URL
 
-                # HTTP error
+                # HTTP error — 403 from Cloudflare means the bypass failed,
+                # not necessarily that the IP lacks access.
                 if resp.status_code == 403:
-                    logger.error(f"  HTTP 403 Forbidden — no institutional access")
+                    desc = _describe_html(resp.content) if resp.content else ""
+                    if "CLOUDFLARE" in desc:
+                        logger.error(f"  HTTP 403 — Cloudflare blocked the request")
+                        if not HAS_CURL_CFFI:
+                            logger.error(f"  Install curl_cffi: pip install curl_cffi")
+                    else:
+                        logger.error(f"  HTTP 403 Forbidden — check institutional access")
                     return None
 
                 if resp.status_code == 429:
@@ -171,11 +222,9 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
                     logger.warning(f"  HTTP {resp.status_code} — trying next URL")
                     continue
 
-            except requests.exceptions.Timeout:
-                logger.warning(f"  Timeout for {url}")
-                continue
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"  Request error: {e}")
+            except Exception as e:
+                # curl_cffi raises its own exception hierarchy; catch broadly.
+                logger.warning(f"  Request error: {type(e).__name__}: {e}")
                 continue
 
         # Delay before next attempt
@@ -215,7 +264,8 @@ def check_access() -> dict:
     Diagnostic: check if the current IP has institutional access to SAGE.
     Returns a dict with IP info and access test results.
     """
-    results = {"ip": "unknown", "sage_access": False, "details": ""}
+    results = {"ip": "unknown", "sage_access": False, "details": "",
+               "curl_cffi": HAS_CURL_CFFI}
 
     # Check our external IP
     try:

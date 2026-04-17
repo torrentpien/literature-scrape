@@ -6,3 +6,6 @@ schedule>=1.2.0
 anthropic>=0.40.0
 flask>=3.0.0
 markdown>=3.5.0
+# curl_cffi is REQUIRED for downloading from Cloudflare-protected
+# publishers (SAGE, Wiley, Taylor & Francis, etc.)
+curl_cffi>=0.7.0
