@@ -212,34 +212,74 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
     - Well-structured XML format
     - Updated when new issues are published
     - Bypasses Cloudflare challenges that affect TOC scraping
+
+    Tries multiple candidate RSS URLs (configured in JOURNALS[key]['rss_urls']
+    or 'rss_url') and returns articles from the first successful feed.
     """
     journal = JOURNALS.get(journal_key)
     if not journal:
         logger.error(f"Unknown journal key: {journal_key}")
         return []
 
-    rss_url = journal.get("rss_url")
-    if not rss_url:
+    # Accept both single URL (legacy) and list of URLs
+    urls: list[str] = []
+    if journal.get("rss_urls"):
+        urls = list(journal["rss_urls"])
+    elif journal.get("rss_url"):
+        urls = [journal["rss_url"]]
+
+    if not urls:
         logger.info(f"No RSS URL configured for {journal_key}")
         return []
 
-    logger.info(f"Fetching RSS: {rss_url}")
-    try:
-        # RSS feeds often benefit from a plain User-Agent
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; LiteratureScraper/1.0)"}
-        resp = requests.get(rss_url, headers=headers, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        logger.error(f"RSS fetch failed: {e}")
+    # Browser-like User-Agent (some SAGE endpoints reject bot UA on RSS)
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.5",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    resp = None
+    rss_url = None
+    for candidate in urls:
+        logger.info(f"Trying RSS: {candidate}")
+        try:
+            r = requests.get(candidate, headers=headers, timeout=REQUEST_TIMEOUT)
+            logger.info(f"  HTTP {r.status_code}, Content-Type={r.headers.get('Content-Type','?')}, "
+                        f"{len(r.content)} bytes")
+            if r.ok and r.content:
+                # Quick sanity check: must look like XML
+                first_bytes = r.content.lstrip()[:200].decode("utf-8", errors="replace")
+                if first_bytes.startswith("<?xml") or first_bytes.lstrip().startswith("<"):
+                    resp = r
+                    rss_url = candidate
+                    break
+                else:
+                    logger.warning(f"  Response does not look like XML. First 100 chars: "
+                                   f"{first_bytes[:100]!r}")
+            else:
+                logger.warning(f"  HTTP {r.status_code} — trying next URL")
+        except requests.RequestException as e:
+            logger.warning(f"  Request failed: {e}")
+
+    if resp is None:
+        logger.error(f"All RSS URLs failed for {journal_key}")
         return []
 
+    logger.info(f"Using RSS URL: {rss_url}")
+
     # Parse RSS XML using lxml
+    from lxml import etree
     try:
-        from lxml import etree
         # RSS feeds may declare encoding in XML prolog; pass bytes
         root = etree.fromstring(resp.content)
     except Exception as e:
         logger.error(f"RSS parse failed: {e}")
+        logger.debug(f"First 500 chars of response: {resp.content[:500]!r}")
         return []
 
     # Collect namespace map (RSS uses dc:, content:, prism:, etc.)
@@ -250,10 +290,19 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
         "atom": "http://www.w3.org/2005/Atom",
     }
 
-    # Handle both RSS 2.0 (<item>) and Atom (<entry>)
+    # Handle RSS 2.0 (<item>), RSS 1.0 / RDF (also <item> but in rdf namespace),
+    # and Atom (<entry>). findall with local-name wildcard covers RDF-namespaced items.
     items = root.findall(".//item")
     if not items:
+        # RSS 1.0 / RDF uses a namespaced <item>; match by local-name
+        items = root.findall(".//{http://purl.org/rss/1.0/}item")
+    if not items:
         items = root.findall(".//atom:entry", nsmap)
+    if not items:
+        # Last resort: any element named "item" regardless of namespace
+        items = [el for el in root.iter() if etree.QName(el).localname == "item"]
+
+    logger.info(f"Parsed {len(items)} <item>/<entry> elements from RSS")
 
     articles = []
     for item in items:
