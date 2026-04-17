@@ -351,12 +351,12 @@ def save_summary(summary: PaperSummary, output_dir: Path = SUMMARY_DIR) -> Path:
 
     # Save JSON
     json_path = output_dir / f"{doi_suffix}.json"
-    json_path.write_text(json.dumps(asdict(summary), ensure_ascii=False, indent=2))
+    json_path.write_text(json.dumps(asdict(summary), ensure_ascii=False, indent=2), encoding="utf-8")
 
     # Save Markdown
     md_path = output_dir / f"{doi_suffix}.md"
     md_content = _format_summary_markdown(summary)
-    md_path.write_text(md_content)
+    md_path.write_text(md_content, encoding="utf-8")
 
     logger.info(f"Saved summary: {md_path.name}")
     return md_path

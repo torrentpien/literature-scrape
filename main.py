@@ -38,6 +38,15 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Force UTF-8 for stdout/stderr on Windows (default is cp950/cp1252)
+# to avoid UnicodeEncodeError when printing non-ASCII characters.
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import schedule as schedule_lib
 
 from config import (
@@ -58,12 +67,20 @@ def setup_logging(verbose: bool = False):
     level = logging.DEBUG if verbose else logging.INFO
     fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
-    logging.basicConfig(level=level, format=fmt)
+    # Stream handler that tolerates encoding errors on Windows consoles
+    stream = logging.StreamHandler(stream=sys.stdout)
+    stream.setFormatter(logging.Formatter(fmt))
+    root = logging.getLogger()
+    root.setLevel(level)
+    # Clear any pre-existing handlers from basicConfig
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    root.addHandler(stream)
 
-    # Also log to file
+    # Also log to file (always UTF-8)
     file_handler = logging.FileHandler(LOG_DIR / "scraper.log", encoding="utf-8")
     file_handler.setFormatter(logging.Formatter(fmt))
-    logging.getLogger().addHandler(file_handler)
+    root.addHandler(file_handler)
 
 
 logger = logging.getLogger(__name__)

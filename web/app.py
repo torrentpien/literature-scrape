@@ -22,6 +22,15 @@ from flask import Flask, jsonify, render_template, request
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Force UTF-8 for stdout/stderr on Windows (default cp950/cp1252 breaks on
+# non-ASCII log output like German/French author names).
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from config import JOURNALS, OUTPUT_DIR, PDF_DIR, SUMMARY_DIR
 from src.scraper import Article, fetch_latest_issue, save_metadata
 from src.downloader import download_all
