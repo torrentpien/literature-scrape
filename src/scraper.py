@@ -398,11 +398,25 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
 
 
 def _xml_text(element, path: str, nsmap: dict | None = None) -> str:
-    """Safely extract text from an XML element by XPath-like path."""
+    """
+    Safely extract ALL text from an XML element by XPath-like path,
+    including text inside nested children.
+
+    This matters for RSS titles like:
+      <title>Book Review: <i>The Book</i> by Author</title>
+    where el.text would only return "Book Review: " (before <i>).
+    Using itertext() we get the full "Book Review: The Book by Author".
+    """
     try:
         el = element.find(path, nsmap) if nsmap else element.find(path)
-        if el is not None and el.text:
-            return el.text.strip()
+        if el is None:
+            return ""
+        # Collect text from the element and all its descendants in order
+        parts = list(el.itertext())
+        text = "".join(parts).strip()
+        # Collapse whitespace (newlines inside nested tags become spaces)
+        text = re.sub(r'\s+', ' ', text)
+        return text
     except Exception:
         pass
     return ""
@@ -545,6 +559,8 @@ def fetch_latest_issue(journal_key: str, max_articles: int = 20) -> list[Article
     issn = journal["issn"]
     all_articles: dict[str, Article] = {}
 
+    PLACEHOLDER_TITLES = {"", "Untitled", "[No title]", "N/A"}
+
     def _merge(article: Article):
         """Add or merge an article into the dict (preserves richer data)."""
         if not article.doi:
@@ -558,6 +574,14 @@ def fetch_latest_issue(journal_key: str, max_articles: int = 20) -> list[Article
                            "volume", "issue", "pages", "publication_date"):
             if not getattr(existing, field_name) and getattr(article, field_name):
                 setattr(existing, field_name, getattr(article, field_name))
+        # Title: replace if existing is empty or a placeholder like "Untitled",
+        # but incoming has a real title. Otherwise prefer the LONGER title
+        # (RSS titles are sometimes truncated).
+        if article.title and article.title not in PLACEHOLDER_TITLES:
+            if existing.title in PLACEHOLDER_TITLES:
+                existing.title = article.title
+            elif len(article.title) > len(existing.title) + 10:
+                existing.title = article.title
         # Merge authors if existing has none
         if not existing.authors and article.authors:
             existing.authors = article.authors
