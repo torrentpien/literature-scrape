@@ -325,6 +325,9 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
         "content": "http://purl.org/rss/1.0/modules/content/",
         "prism": "http://prismstandard.org/namespaces/basic/2.0/",
         "atom": "http://www.w3.org/2005/Atom",
+        # RSS 1.0 default namespace — Nature and other RDF feeds put
+        # <title>/<link>/<description> in this namespace.
+        "rss": "http://purl.org/rss/1.0/",
     }
 
     # Handle RSS 2.0 (<item>), RSS 1.0 / RDF (also <item> but in rdf namespace),
@@ -343,8 +346,24 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
 
     articles = []
     for item in items:
-        title = _xml_text(item, "title") or _xml_text(item, "atom:title", nsmap) or "Untitled"
-        link = _xml_text(item, "link") or ""
+        # Title: try no-namespace (RSS 2.0), rss: (RSS 1.0/RDF like Nature),
+        # then atom: (Atom feeds).
+        title = (
+            _xml_text(item, "title") or
+            _xml_text(item, "rss:title", nsmap) or
+            _xml_text(item, "atom:title", nsmap) or
+            "Untitled"
+        )
+        # Strip embedded HTML tags (AJS book reviews often contain
+        # <i>Book Title</i> literally in the title text).
+        title = _strip_html(title)
+        if not title or title.strip() in ("", ":"):
+            title = "Untitled"
+        link = (
+            _xml_text(item, "link") or
+            _xml_text(item, "rss:link", nsmap) or
+            ""
+        )
         if not link:
             # Atom uses <link href="..."/>
             link_el = item.find("atom:link", nsmap)
@@ -387,6 +406,7 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
         # Description / abstract
         description = (
             _xml_text(item, "description") or
+            _xml_text(item, "rss:description", nsmap) or
             _xml_text(item, "content:encoded", nsmap) or
             _xml_text(item, "atom:summary", nsmap) or
             ""
@@ -467,6 +487,27 @@ def _xml_text(element, path: str, nsmap: dict | None = None) -> str:
     except Exception:
         pass
     return ""
+
+
+def _strip_html(text: str) -> str:
+    """
+    Remove HTML tags from text while preserving content.
+
+    Some feeds (e.g., AJS book reviews) embed literal HTML like
+    "Review: <i>Book Title</i>" inside the <title> text node.
+    Since these aren't real XML elements, we need to post-process
+    with an HTML parser to clean them up.
+    """
+    if not text:
+        return text
+    if "<" not in text and "&" not in text:
+        return text
+    try:
+        cleaned = BeautifulSoup(text, "lxml").get_text(" ", strip=True)
+        # Collapse repeated whitespace that might result
+        return re.sub(r'\s+', ' ', cleaned).strip()
+    except Exception:
+        return text
 
 
 def _normalize_date(date_str: str) -> str:
