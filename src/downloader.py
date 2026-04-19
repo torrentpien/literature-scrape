@@ -56,18 +56,16 @@ def _build_sage_pdf_url(doi: str) -> str:
     return f"https://journals.sagepub.com/doi/pdf/{doi}"
 
 
-def _atypon_candidates(article: Article) -> list[str]:
+def _pdf_candidates(article: Article) -> list[str]:
     """
     Build PDF URL candidates for an article from its metadata.
 
-    Atypon-based platforms (SAGE, Chicago, Taylor & Francis) all share
-    these URL patterns:
-      /doi/pdf/{doi}   — main PDF
-      /doi/epdf/{doi}  — enhanced PDF viewer (fallback)
-      /doi/pdfdirect/{doi} — direct PDF download (Wiley-style)
+    Supports two platform types:
+    - Atypon (SAGE, Chicago, T&F, Wiley): /doi/pdf/{doi}, /doi/epdf/...
+    - Springer Nature: /articles/{article_id}.pdf
 
-    Derives the host from the article's pdf_url or landing_url so this
-    works for any publisher, not just SAGE.
+    Derives the host from the article's existing URLs so this works
+    for any publisher automatically.
     """
     urls: list[str] = []
     if article.pdf_url:
@@ -82,11 +80,32 @@ def _atypon_candidates(article: Article) -> list[str]:
                 base_host = m.group(1)
                 break
 
-    if article.doi and base_host:
-        for pattern in ("/doi/pdf/{doi}", "/doi/epdf/{doi}", "/doi/pdfdirect/{doi}"):
-            candidate = f"{base_host}{pattern}".format(doi=article.doi)
-            if candidate not in urls:
-                urls.append(candidate)
+    if not article.doi or not base_host:
+        return urls
+
+    article_id = article.doi.split("/", 1)[-1] if "/" in article.doi else article.doi
+
+    # Detect platform type from host
+    is_nature = "nature.com" in base_host
+
+    if is_nature:
+        # Springer Nature URL patterns
+        patterns = [
+            f"/articles/{article_id}.pdf",
+            f"/articles/{article_id}",
+        ]
+    else:
+        # Atypon URL patterns (SAGE, Chicago, T&F, Wiley)
+        patterns = [
+            f"/doi/pdf/{article.doi}",
+            f"/doi/epdf/{article.doi}",
+            f"/doi/pdfdirect/{article.doi}",
+        ]
+
+    for pattern in patterns:
+        candidate = f"{base_host}{pattern}"
+        if candidate not in urls:
+            urls.append(candidate)
 
     return urls
 
@@ -186,8 +205,8 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
         )
         return None
 
-    # Build list of PDF URL candidates (works for any Atypon publisher)
-    candidate_urls = _atypon_candidates(article)
+    # Build list of PDF URL candidates (works for Atypon + Nature platforms)
+    candidate_urls = _pdf_candidates(article)
     if not candidate_urls:
         logger.warning(f"No candidate PDF URLs for: {article.title}")
         return None

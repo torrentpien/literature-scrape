@@ -373,12 +373,22 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
         volume = _xml_text(item, "prism:volume", nsmap) or ""
         issue = _xml_text(item, "prism:number", nsmap) or ""
 
-        # Build URLs
+        # Build URLs.
+        # Nature uses {article_id} in templates (e.g., "s41558-025-02345-7"),
+        # Atypon publishers use {doi}. We extract the article_id from the DOI
+        # (the part after the prefix like "10.1038/") and provide both placeholders.
         pdf_url = ""
         landing_url = link
         if doi:
-            pdf_url = journal["pdf_base_url"].format(doi=doi)
-            landing_url = journal["landing_url"].format(doi=doi)
+            article_id = doi.split("/", 1)[-1] if "/" in doi else doi
+            try:
+                pdf_url = journal["pdf_base_url"].format(doi=doi, article_id=article_id)
+            except KeyError:
+                pdf_url = journal["pdf_base_url"].format(doi=doi)
+            try:
+                landing_url = journal["landing_url"].format(doi=doi, article_id=article_id)
+            except KeyError:
+                landing_url = journal["landing_url"].format(doi=doi)
 
         articles.append(Article(
             title=title.strip(),
@@ -610,12 +620,23 @@ def fetch_latest_issue(journal_key: str, max_articles: int = 20) -> list[Article
         for article in scrape_atypon_toc(journal_key):
             _merge(article)
 
-    # Ensure all articles have PDF URLs constructed from DOI
+    # Ensure all articles have PDF/landing URLs constructed from DOI.
+    # Nature uses {article_id} (suffix after DOI prefix); Atypon uses {doi}.
     for article in all_articles.values():
-        if not article.pdf_url and article.doi:
-            article.pdf_url = journal["pdf_base_url"].format(doi=article.doi)
-        if not article.landing_url and article.doi:
-            article.landing_url = journal["landing_url"].format(doi=article.doi)
+        if article.doi:
+            article_id = article.doi.split("/", 1)[-1] if "/" in article.doi else article.doi
+            if not article.pdf_url:
+                try:
+                    article.pdf_url = journal["pdf_base_url"].format(
+                        doi=article.doi, article_id=article_id)
+                except KeyError:
+                    article.pdf_url = journal["pdf_base_url"].format(doi=article.doi)
+            if not article.landing_url:
+                try:
+                    article.landing_url = journal["landing_url"].format(
+                        doi=article.doi, article_id=article_id)
+                except KeyError:
+                    article.landing_url = journal["landing_url"].format(doi=article.doi)
 
     articles = list(all_articles.values())
 
