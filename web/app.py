@@ -181,9 +181,22 @@ def run_pipeline_bg(journal_key: str, backend: str = "openai", lang: str = "zh",
                     landing_url=a.get("landing_url", ""),
                 )
                 articles.append(article)
-                # Look up the PDF file
-                pdf_path = journal_pdf_dir / article.pdf_filename
-                if pdf_path.exists():
+                # Look up the PDF file.
+                # Search by DOI-suffix prefix because the filename includes
+                # the title, which may have changed since the PDF was downloaded
+                # (e.g., "Untitled" -> real title). Match by DOI part only.
+                doi_suffix = article.doi.split("/")[-1] if article.doi else ""
+                pdf_path = None
+                if doi_suffix:
+                    matches = list(journal_pdf_dir.glob(f"{doi_suffix}*.pdf"))
+                    if matches:
+                        pdf_path = matches[0]
+                if not pdf_path:
+                    # Fallback: try exact filename (works if title hasn't changed)
+                    exact = journal_pdf_dir / article.pdf_filename
+                    if exact.exists():
+                        pdf_path = exact
+                if pdf_path:
                     downloaded[article.doi] = pdf_path
 
             _add_log(f"找到 {len(articles)} 篇文章，其中 {len(downloaded)} 篇有 PDF")

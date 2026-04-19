@@ -55,11 +55,23 @@ function startPipeline() {
 }
 
 function startSummarizeOnly() {
+  const params = _collectParams();
+  if (!params.force) {
+    // Warn if force is not checked — user might expect re-generation
+    if (!confirm(
+      "目前「強制重新摘要」未勾選。\n\n" +
+      "已有摘要的文章將被跳過，只有尚未摘要的文章會被處理。\n" +
+      "如果要用新的 prompt 重新產生所有摘要，請勾選「強制重新摘要已有的文章」。\n\n" +
+      "是否繼續？"
+    )) {
+      return;
+    }
+  }
   _setButtonsDisabled(true);
   fetch("/api/summarize-only", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(_collectParams()),
+    body: JSON.stringify(params),
   })
     .then((r) => r.json())
     .then((data) => {
