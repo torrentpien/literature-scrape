@@ -61,6 +61,11 @@
         原文連結
       </a>
       {% endif %}
+      {% if summary and summary.r_simulation_code %}
+      <a href="/article/{{ journal_key }}/{{ article.doi.split('/')[-1] }}/rcode" class="btn btn-sm btn-primary">
+        R 模擬程式碼
+      </a>
+      {% endif %}
     </div>
   </div>
 

@@ -359,6 +359,35 @@ def article_detail(journal_key: str, doi_suffix: str):
                            status=status)
 
 
+@app.route("/article/<journal_key>/<doi_suffix>/rcode")
+def article_rcode(journal_key: str, doi_suffix: str):
+    """R simulation code page for an article."""
+    if journal_key not in JOURNALS:
+        return "Journal not found", 404
+
+    journal = JOURNALS[journal_key]
+    articles = load_metadata(journal_key)
+
+    article = None
+    for a in articles:
+        if a.get("doi", "").split("/")[-1] == doi_suffix:
+            article = a
+            break
+
+    if not article:
+        return "Article not found", 404
+
+    summary_data = load_summary(journal_key, doi_suffix)
+    r_code = summary_data.get("r_simulation_code", "") if summary_data else ""
+
+    return render_template("rcode.html",
+                           journal_key=journal_key,
+                           journal=journal,
+                           article=article,
+                           doi_suffix=doi_suffix,
+                           r_code=r_code)
+
+
 # ── API routes ────────────────────────────────────────────────────────────
 
 @app.route("/api/run", methods=["POST"])

@@ -85,8 +85,7 @@ SUMMARY_PROMPT_ZH = """\
 ## 5. 研究模型與方法（Model & Methodology）
 - 使用何種研究方法（質化、量化或混合）？
 - 具體分析工具或模型為何（例如：回歸分析、SEM、case study 等）？
-- 自變項、依變項、或工具變項為何？
-- 如果用R重製這個研究的模型，產製模擬數據及模型程式碼為何？
+- 自變項（independent variables）、依變項（dependent variables）、控制變項、或工具變項為何？
 
 ## 6. 模型結果（Findings / Results）
 - 主要實證結果是什麼？
@@ -99,6 +98,16 @@ SUMMARY_PROMPT_ZH = """\
 ## 8. 限制與未來研究（Limitations & Future Research）
 - 作者提到哪些限制？
 - 未來研究方向為何？
+
+## 9. R 模擬重製程式碼（R Simulation Code）
+
+根據你對本文的資料結構、變項定義、與統計模型的理解，請產出一段完整且可直接執行的 R 程式碼，包含以下兩部分：
+
+**（a）模擬數據**：根據論文的變項、樣本量、資料特性，產製模擬數據（simulated data），變項名稱與論文一致。
+
+**（b）統計模型**：使用論文中的分析方法（如 OLS、logistic regression、fixed effects、multilevel model 等）對模擬數據進行分析，並印出模型結果摘要。
+
+請將完整 R 程式碼放在 ```r ... ``` 的 code block 中。程式碼中請加上中文註解說明每一步驟。
 
 請使用條列與清楚的小標題呈現，每一部分簡潔但具體。
 如果原文未明確說明某一點，請標註「未明確說明 / Not explicitly stated」，不要自行臆測。
@@ -180,6 +189,7 @@ class PaperSummary:
     findings: str = ""                   # 6. 模型結果
     conclusion_contribution: str = ""    # 7. 重要結論與貢獻
     limitations: str = ""                # 8. 限制與未來研究
+    r_simulation_code: str = ""          # 9. R 模擬重製程式碼
     raw_summary: str = ""
 
 
@@ -380,13 +390,27 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[:max_chars].rsplit(" ", 1)[0] + "..."
 
 
+def _extract_r_code(raw_text: str) -> str:
+    """Extract R code blocks (```r ... ```) from the raw LLM output."""
+    blocks = re.findall(r'```[rR]?\s*\n(.*?)```', raw_text, re.DOTALL)
+    if blocks:
+        return "\n\n".join(block.strip() for block in blocks)
+    return ""
+
+
 def _parse_summary(article: Article, raw_text: str) -> PaperSummary:
     """Parse LLM-generated markdown summary into structured fields."""
     summary = _empty_summary(article)
     summary.raw_summary = raw_text
 
+    # Extract R code blocks before section parsing (they span many lines
+    # and would break the line-by-line heading matcher).
+    summary.r_simulation_code = _extract_r_code(raw_text)
+
     # Map heading keywords to fields. Order matters — more specific first.
     section_map = [
+        # 9. R Simulation Code (heading only; actual code extracted above)
+        (["R 模擬", "R Simulation", "R Code", "R 程式碼"], "r_simulation_code"),
         # 8. Limitations (check before "Conclusion" because that section may discuss limits)
         (["限制", "Limitations", "Future Research"], "limitations"),
         # 7. Conclusion
@@ -424,21 +448,26 @@ def _parse_summary(article: Article, raw_text: str) -> PaperSummary:
             matched_field = find_field(stripped)
             if matched_field:
                 # Save previous section
-                if current_field and current_content:
+                if current_field and current_field != "r_simulation_code" and current_content:
                     prev = getattr(summary, current_field, "")
                     new_content = "\n".join(current_content).strip()
-                    # Concatenate if the field was matched before (shouldn't happen normally)
                     setattr(summary, current_field,
                             (prev + "\n\n" + new_content).strip() if prev else new_content)
-                current_field = matched_field
-                current_content = []
+                # R code is already extracted via _extract_r_code();
+                # don't overwrite it with raw section text.
+                if matched_field == "r_simulation_code":
+                    current_field = None
+                    current_content = []
+                else:
+                    current_field = matched_field
+                    current_content = []
                 continue
 
         if current_field:
             current_content.append(line)
 
-    # Save the last section
-    if current_field and current_content:
+    # Save the last section (skip r_simulation_code — handled separately)
+    if current_field and current_field != "r_simulation_code" and current_content:
         prev = getattr(summary, current_field, "")
         new_content = "\n".join(current_content).strip()
         setattr(summary, current_field,
@@ -536,4 +565,10 @@ def _format_summary_markdown(s: PaperSummary) -> str:
 ## 8. 限制與未來研究 (Limitations & Future Research)
 
 {s.limitations or "N/A"}
+
+## 9. R 模擬重製程式碼 (R Simulation Code)
+
+```r
+{s.r_simulation_code or "# N/A"}
+```
 """
