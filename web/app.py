@@ -35,7 +35,7 @@ from config import JOURNALS, OUTPUT_DIR, PDF_DIR, SUMMARY_DIR
 from src.scraper import Article, fetch_latest_issue, save_metadata
 from src.downloader import download_all
 from src.extractor import extract_text_from_pdf
-from src.summarizer import save_summary, summarize
+from src.summarizer import save_summary, summarize, regenerate_r_code
 
 logger = logging.getLogger(__name__)
 
@@ -511,6 +511,74 @@ def api_check_updates(journal_key: str):
         "new_count": len(new_articles),
         "new_articles": new_articles[:20],
     })
+
+
+@app.route("/api/regenerate-rcode/<journal_key>/<doi_suffix>", methods=["POST"])
+def api_regenerate_rcode(journal_key: str, doi_suffix: str):
+    """
+    Regenerate ONLY the R simulation code for a single article.
+    Uses a dedicated R-focused prompt for higher quality output.
+    """
+    if journal_key not in JOURNALS:
+        return jsonify({"error": "Unknown journal"}), 400
+
+    data = request.json or {}
+    backend = data.get("backend", "openai")
+
+    # Load article metadata
+    articles_data = load_metadata(journal_key)
+    article_data = None
+    for a in articles_data:
+        if a.get("doi", "").split("/")[-1] == doi_suffix:
+            article_data = a
+            break
+    if not article_data:
+        return jsonify({"error": "Article not found in metadata"}), 404
+
+    # Find the PDF
+    journal_pdf_dir = PDF_DIR / journal_key
+    pdf_path = None
+    if journal_pdf_dir.exists():
+        matches = list(journal_pdf_dir.glob(f"{doi_suffix}*.pdf"))
+        if matches:
+            pdf_path = matches[0]
+    if not pdf_path:
+        return jsonify({"error": "PDF not found. Download the PDF first."}), 404
+
+    # Extract text
+    paper = extract_text_from_pdf(pdf_path)
+    if not paper.full_text:
+        return jsonify({"error": "Could not extract text from PDF"}), 500
+
+    # Build Article object
+    from src.scraper import Article
+    article = Article(
+        title=article_data.get("title", ""),
+        authors=article_data.get("authors", []),
+        doi=article_data.get("doi", ""),
+        journal=article_data.get("journal", ""),
+        volume=article_data.get("volume", ""),
+        issue=article_data.get("issue", ""),
+    )
+
+    # Regenerate R code with the dedicated prompt
+    r_code = regenerate_r_code(article, paper, backend=backend)
+
+    if not r_code:
+        return jsonify({"error": "Failed to generate R code (API error or qualitative study)"}), 500
+
+    # Update the existing summary JSON with the new R code
+    summary_data = load_summary(journal_key, doi_suffix) or {}
+    summary_data["r_simulation_code"] = r_code
+    summary_json_path = SUMMARY_DIR / journal_key / f"{doi_suffix}.json"
+    summary_json_path.parent.mkdir(parents=True, exist_ok=True)
+    import json as json_mod
+    summary_json_path.write_text(
+        json_mod.dumps(summary_data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    return jsonify({"status": "ok", "r_code": r_code})
 
 
 @app.route("/api/status")
