@@ -64,14 +64,25 @@
 </section>
 
 <!-- Journal Cards -->
+<div class="journal-grid-header">
+  <h2>期刊列表</h2>
+  <button class="btn btn-sm btn-outline" onclick="checkAllUpdates()">
+    全部檢查新文章
+  </button>
+</div>
 <section class="journal-grid">
   {% for j in journals %}
-  <a href="/journal/{{ j.key }}" class="card journal-card">
+  <div class="card journal-card" id="jcard-{{ j.key }}">
     <div class="journal-card-header">
-      <h3>{{ j.name }}</h3>
+      <h3><a href="/journal/{{ j.key }}">{{ j.name }}</a></h3>
       <span class="publisher-badge">{{ j.publisher | upper }}</span>
     </div>
-    <p class="journal-issn">ISSN: {{ j.issn }}</p>
+    <p class="journal-issn">
+      ISSN: {{ j.issn }}
+      {% if j.latest_vol %}
+       &middot; 目前：Vol. {{ j.latest_vol }}{% if j.latest_iss %}, No. {{ j.latest_iss }}{% endif %}
+      {% endif %}
+    </p>
     <div class="journal-stats">
       <div class="stat">
         <span class="stat-number">{{ j.article_count }}</span>
@@ -91,7 +102,17 @@
       <div class="journal-bar-fill" style="width: {{ (j.summary_count / j.article_count * 100) | int }}%"></div>
     </div>
     {% endif %}
-  </a>
+
+    <!-- Check for new issue / update actions -->
+    <div class="journal-card-actions">
+      <button class="btn btn-sm btn-outline" onclick="checkUpdates('{{ j.key }}')"
+              id="btn-check-{{ j.key }}">
+        檢查新文章
+      </button>
+      <a href="/journal/{{ j.key }}" class="btn btn-sm btn-outline">瀏覽文章</a>
+    </div>
+    <div class="journal-update-result hidden" id="update-result-{{ j.key }}"></div>
+  </div>
   {% endfor %}
 
   {% if not journals %}

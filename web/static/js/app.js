@@ -145,6 +145,81 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// ── Check for new articles ───────────────────────────────────────────────
+
+function checkUpdates(journalKey) {
+  const btn = document.getElementById("btn-check-" + journalKey);
+  const resultDiv = document.getElementById("update-result-" + journalKey);
+  if (!btn || !resultDiv) return;
+
+  btn.disabled = true;
+  btn.textContent = "檢查中...";
+  resultDiv.classList.remove("hidden");
+  resultDiv.innerHTML = '<span class="update-loading">正在查詢 RSS ...</span>';
+
+  fetch("/api/check-updates/" + journalKey)
+    .then((r) => r.json())
+    .then((data) => {
+      btn.disabled = false;
+      btn.textContent = "檢查新文章";
+
+      if (data.error) {
+        resultDiv.innerHTML =
+          '<span class="update-error">查詢失敗：' + escapeHtml(data.error) + "</span>";
+        return;
+      }
+
+      if (data.new_count === 0) {
+        resultDiv.innerHTML =
+          '<span class="update-none">沒有新文章（RSS 共 ' +
+          data.rss_total + " 篇，已有 " + data.existing_total + " 篇）</span>";
+        return;
+      }
+
+      // Build new article list
+      let html =
+        '<div class="update-found">' +
+        '<strong>發現 ' + data.new_count + ' 篇新文章！</strong>' +
+        '<ul class="update-article-list">';
+      data.new_articles.forEach((a) => {
+        html +=
+          "<li>" + escapeHtml(a.title) +
+          ' <span class="update-doi">' + escapeHtml(a.doi) + "</span></li>";
+      });
+      if (data.new_count > 20) {
+        html += "<li>...及另外 " + (data.new_count - 20) + " 篇</li>";
+      }
+      html += "</ul>";
+      html +=
+        '<button class="btn btn-sm btn-primary" onclick="fetchNewArticles(\'' +
+        journalKey + "')\">" +
+        "下載新文章並產生摘要</button>";
+      html += "</div>";
+      resultDiv.innerHTML = html;
+    })
+    .catch((err) => {
+      btn.disabled = false;
+      btn.textContent = "檢查新文章";
+      resultDiv.innerHTML =
+        '<span class="update-error">查詢失敗：' + escapeHtml(String(err)) + "</span>";
+    });
+}
+
+function fetchNewArticles(journalKey) {
+  // Set the journal selector to match and trigger full pipeline
+  const sel = document.getElementById("sel-journal");
+  if (sel) sel.value = journalKey;
+  startPipeline();
+}
+
+function checkAllUpdates() {
+  // Trigger check for every journal card on the page
+  document.querySelectorAll("[id^='btn-check-']").forEach((btn) => {
+    const key = btn.id.replace("btn-check-", "");
+    checkUpdates(key);
+  });
+}
+
 // On page load, check if pipeline is already running
 document.addEventListener("DOMContentLoaded", () => {
   fetch("/api/status")
