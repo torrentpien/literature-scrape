@@ -243,28 +243,65 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
         "Accept-Language": "en-US,en;q=0.9",
     }
 
+    # Try to use curl_cffi for RSS too — Nature's RSS feed is also
+    # behind Cloudflare and will 403 with plain requests.
+    try:
+        from curl_cffi import requests as cffi_requests  # type: ignore
+        _has_cffi = True
+    except ImportError:
+        cffi_requests = None
+        _has_cffi = False
+
+    cffi_targets = ["chrome131", "chrome120", "chrome"]
+
     resp = None
     rss_url = None
     for candidate in urls:
         logger.info(f"Trying RSS: {candidate}")
-        try:
-            r = requests.get(candidate, headers=headers, timeout=REQUEST_TIMEOUT)
-            logger.info(f"  HTTP {r.status_code}, Content-Type={r.headers.get('Content-Type','?')}, "
-                        f"{len(r.content)} bytes")
-            if r.ok and r.content:
-                # Quick sanity check: must look like XML
-                first_bytes = r.content.lstrip()[:200].decode("utf-8", errors="replace")
-                if first_bytes.startswith("<?xml") or first_bytes.lstrip().startswith("<"):
-                    resp = r
-                    rss_url = candidate
-                    break
+
+        # Attempt 1: curl_cffi with browser impersonation (bypasses Cloudflare)
+        if _has_cffi:
+            for target in cffi_targets:
+                try:
+                    r = cffi_requests.get(candidate, impersonate=target,
+                                          timeout=REQUEST_TIMEOUT, allow_redirects=True)
+                    logger.info(f"  ({target}) HTTP {r.status_code}, "
+                                f"Content-Type={r.headers.get('Content-Type','?')}, "
+                                f"{len(r.content)} bytes")
+                    if r.ok and r.content:
+                        first_bytes = r.content.lstrip()[:200].decode("utf-8", errors="replace")
+                        if first_bytes.startswith("<?xml") or first_bytes.lstrip().startswith("<"):
+                            resp = r
+                            rss_url = candidate
+                            break
+                        else:
+                            logger.warning(f"  Not XML. First 100 chars: {first_bytes[:100]!r}")
+                    else:
+                        logger.info(f"  ({target}) HTTP {r.status_code}")
+                except Exception as e:
+                    logger.info(f"  ({target}) error: {e}")
+            if resp:
+                break
+
+        # Attempt 2: plain requests (works for non-Cloudflare sites)
+        if not resp:
+            try:
+                r = requests.get(candidate, headers=headers, timeout=REQUEST_TIMEOUT)
+                logger.info(f"  (requests) HTTP {r.status_code}, "
+                            f"Content-Type={r.headers.get('Content-Type','?')}, "
+                            f"{len(r.content)} bytes")
+                if r.ok and r.content:
+                    first_bytes = r.content.lstrip()[:200].decode("utf-8", errors="replace")
+                    if first_bytes.startswith("<?xml") or first_bytes.lstrip().startswith("<"):
+                        resp = r
+                        rss_url = candidate
+                        break
+                    else:
+                        logger.warning(f"  Not XML. First 100 chars: {first_bytes[:100]!r}")
                 else:
-                    logger.warning(f"  Response does not look like XML. First 100 chars: "
-                                   f"{first_bytes[:100]!r}")
-            else:
-                logger.warning(f"  HTTP {r.status_code} — trying next URL")
-        except requests.RequestException as e:
-            logger.warning(f"  Request failed: {e}")
+                    logger.warning(f"  HTTP {r.status_code} — trying next URL")
+            except requests.RequestException as e:
+                logger.warning(f"  Request failed: {e}")
 
     if resp is None:
         logger.error(f"All RSS URLs failed for {journal_key}")
