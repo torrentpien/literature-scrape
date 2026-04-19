@@ -52,7 +52,43 @@ IMPERSONATE_TARGETS = [
 
 
 def _build_sage_pdf_url(doi: str) -> str:
+    """Legacy helper kept for backward compat; prefer _atypon_candidates()."""
     return f"https://journals.sagepub.com/doi/pdf/{doi}"
+
+
+def _atypon_candidates(article: Article) -> list[str]:
+    """
+    Build PDF URL candidates for an article from its metadata.
+
+    Atypon-based platforms (SAGE, Chicago, Taylor & Francis) all share
+    these URL patterns:
+      /doi/pdf/{doi}   — main PDF
+      /doi/epdf/{doi}  — enhanced PDF viewer (fallback)
+      /doi/pdfdirect/{doi} — direct PDF download (Wiley-style)
+
+    Derives the host from the article's pdf_url or landing_url so this
+    works for any publisher, not just SAGE.
+    """
+    urls: list[str] = []
+    if article.pdf_url:
+        urls.append(article.pdf_url)
+
+    # Derive publisher host from existing URLs
+    base_host = ""
+    for u in (article.pdf_url, article.landing_url):
+        if u:
+            m = re.match(r"(https?://[^/]+)", u)
+            if m:
+                base_host = m.group(1)
+                break
+
+    if article.doi and base_host:
+        for pattern in ("/doi/pdf/{doi}", "/doi/epdf/{doi}", "/doi/pdfdirect/{doi}"):
+            candidate = f"{base_host}{pattern}".format(doi=article.doi)
+            if candidate not in urls:
+                urls.append(candidate)
+
+    return urls
 
 
 def _cffi_get(url: str, timeout: int = REQUEST_TIMEOUT, allow_redirects: bool = True):
@@ -137,7 +173,6 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
         logger.warning(f"No PDF URL or DOI for: {article.title}")
         return None
 
-    pdf_url = article.pdf_url or _build_sage_pdf_url(article.doi)
     output_path = output_dir / article.pdf_filename
 
     if output_path.exists():
@@ -151,13 +186,11 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
         )
         return None
 
-    # Build list of PDF URL candidates
-    candidate_urls = [pdf_url]
-    if article.doi:
-        direct = _build_sage_pdf_url(article.doi)
-        if direct != pdf_url:
-            candidate_urls.append(direct)
-        candidate_urls.append(f"https://journals.sagepub.com/doi/epdf/{article.doi}")
+    # Build list of PDF URL candidates (works for any Atypon publisher)
+    candidate_urls = _atypon_candidates(article)
+    if not candidate_urls:
+        logger.warning(f"No candidate PDF URLs for: {article.title}")
+        return None
 
     for attempt in range(1, MAX_RETRIES + 1):
         logger.info(f"Download attempt {attempt}/{MAX_RETRIES}: {article.title[:60]}...")

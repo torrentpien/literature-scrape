@@ -425,38 +425,62 @@ def _normalize_date(date_str: str) -> str:
     return date_str
 
 
-def scrape_sage_toc(journal_key: str) -> list[Article]:
-    """Scrape SAGE table-of-contents page directly for article links."""
+def scrape_atypon_toc(journal_key: str) -> list[Article]:
+    """
+    Scrape an Atypon-platform TOC page (SAGE, Chicago, T&F all use Atypon).
+
+    Uses curl_cffi if available to bypass Cloudflare. Falls back to
+    plain requests otherwise (will likely fail on SAGE).
+    """
     journal = JOURNALS.get(journal_key)
     if not journal:
         logger.error(f"Unknown journal key: {journal_key}")
         return []
 
-    toc_url = journal["toc_url"]
-    logger.info(f"Scraping SAGE TOC: {toc_url}")
+    toc_url = journal.get("toc_url")
+    if not toc_url:
+        return []
 
+    logger.info(f"Scraping TOC: {toc_url}")
+
+    # Prefer curl_cffi (Atypon platforms typically sit behind Cloudflare)
     try:
-        resp = requests.get(toc_url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        logger.error(f"SAGE TOC scraping failed: {e}")
+        from curl_cffi import requests as cffi_requests  # type: ignore
+        resp = cffi_requests.get(toc_url, impersonate="chrome131",
+                                 timeout=REQUEST_TIMEOUT, allow_redirects=True)
+    except ImportError:
+        try:
+            resp = requests.get(toc_url, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+        except requests.RequestException as e:
+            logger.error(f"TOC scraping failed: {e}")
+            return []
+    except Exception as e:
+        logger.error(f"TOC scraping failed: {e}")
+        return []
+
+    if resp.status_code != 200:
+        logger.error(f"TOC returned HTTP {resp.status_code}")
         return []
 
     soup = BeautifulSoup(resp.text, "lxml")
     articles = []
 
-    # SAGE uses various class patterns for article listings
-    # Try multiple selectors
+    # Atypon uses these class patterns across SAGE, Chicago, T&F, Wiley
     article_blocks = (
         soup.select("div.issue-item") or
         soup.select("article.article") or
         soup.select("div.art_title") or
         soup.select("tr.article-row") or
-        soup.select("div[class*='issue-item']")
+        soup.select("div[class*='issue-item']") or
+        soup.select("li.toc-item")
     )
 
+    # Derive base host from toc_url (so same code works for SAGE + uchicago)
+    host_match = re.match(r"(https?://[^/]+)", toc_url)
+    base_host = host_match.group(1) if host_match else ""
+
     for block in article_blocks:
-        # Extract title
         title_el = (
             block.select_one("h5.issue-item__title a") or
             block.select_one("span.art_title a") or
@@ -470,25 +494,27 @@ def scrape_sage_toc(journal_key: str) -> list[Article]:
         title = title_el.get_text(strip=True)
         href = title_el.get("href", "")
 
-        # Extract DOI from href (e.g., /doi/full/10.1177/xxx or /doi/10.1177/xxx)
-        doi_match = re.search(r'/doi/(?:full/|abs/)?(.+?)(?:\?|$)', href)
+        # Extract DOI from href: /doi/full/10.xxx, /doi/abs/10.xxx, /doi/10.xxx
+        doi_match = re.search(r'/doi/(?:full/|abs/|pdf/)?(10\.\d+/[^?\s&#]+)', href)
         doi = doi_match.group(1) if doi_match else ""
 
-        # Extract authors
         author_els = (
             block.select("span.hlFld-ContribAuthor a") or
             block.select("span.contribDeg498 a") or
-            block.select("div.issue-item__loa a")
+            block.select("div.issue-item__loa a") or
+            block.select("a.author")
         )
         authors = [a.get_text(strip=True) for a in author_els]
 
-        # Build PDF URL
         pdf_url = ""
+        landing_url = ""
         if doi:
             pdf_url = journal["pdf_base_url"].format(doi=doi)
             landing_url = journal["landing_url"].format(doi=doi)
+        elif href.startswith("/") and base_host:
+            landing_url = base_host + href
         else:
-            landing_url = f"https://journals.sagepub.com{href}" if href.startswith("/") else href
+            landing_url = href
 
         articles.append(Article(
             title=title,
@@ -499,8 +525,12 @@ def scrape_sage_toc(journal_key: str) -> list[Article]:
             landing_url=landing_url,
         ))
 
-    logger.info(f"SAGE TOC scraping found {len(articles)} articles")
+    logger.info(f"TOC scraping found {len(articles)} articles")
     return articles
+
+
+# Backward-compat alias
+scrape_sage_toc = scrape_atypon_toc
 
 
 def fetch_latest_issue(journal_key: str, max_articles: int = 20) -> list[Article]:
@@ -548,11 +578,12 @@ def fetch_latest_issue(journal_key: str, max_articles: int = 20) -> list[Article
     for article in fetch_articles_openalex(issn, per_page=max_articles):
         _merge(article)
 
-    # Strategy 4: SAGE TOC scraping (last resort, fills remaining gaps)
-    if journal.get("publisher") == "sage" and len(all_articles) < 3:
+    # Strategy 4: TOC scraping (last resort for Atypon-based publishers).
+    # Works for SAGE, University of Chicago Press, Taylor & Francis, Wiley.
+    if journal.get("publisher") in ("sage", "uchicago", "tandf", "wiley") and len(all_articles) < 3:
         time.sleep(1)
-        logger.info("Few articles found; trying SAGE TOC scraping as fallback")
-        for article in scrape_sage_toc(journal_key):
+        logger.info("Few articles found; trying TOC scraping as fallback")
+        for article in scrape_atypon_toc(journal_key):
             _merge(article)
 
     # Ensure all articles have PDF URLs constructed from DOI
