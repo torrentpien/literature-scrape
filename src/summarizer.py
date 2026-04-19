@@ -39,7 +39,23 @@ logger = logging.getLogger(__name__)
 # ── Prompt templates ──────────────────────────────────────────────────────
 
 SUMMARY_PROMPT_ZH = """\
-請閱讀以下學術論文內容，並以嚴謹且結構化的方式進行分析與摘要。請避免空泛描述，盡可能使用論文中的實際概念與術語，並且每一節都以中英文並列產出摘要。
+請閱讀以下學術論文內容，並以嚴謹且結構化的方式進行分析與摘要。請避免空泛描述，盡可能使用論文中的實際概念與術語。
+
+重要格式要求：每一節的內容都必須同時以「繁體中文」和「English」兩種語言並列呈現。請先寫中文，再寫英文，以「---」分隔，如下列範例所示：
+
+範例格式：
+## 1. 研究問題（Research Question）
+**【中文】**
+- 核心問題：收入不平等如何影響政治參與？
+- 研究動機：民主社會的不平等加劇，引發對政治代表性的關注。
+
+**【English】**
+- Core question: How does income inequality affect political participation?
+- Motivation: Rising inequality in democracies raises concerns about political representation.
+
+（以下每一節都請嚴格依照此「中文 → English」並列格式呈現。）
+
+---
 
 論文基本資訊：
 - 標題：{title}
@@ -48,7 +64,7 @@ SUMMARY_PROMPT_ZH = """\
 - 卷期：Vol. {volume}, No. {issue}
 - 出版日期：{pub_date}
 
-請依照以下架構輸出：
+請依照以下架構輸出（每一節都必須中英文並列）：
 
 ## 1. 研究問題（Research Question）
 - 作者試圖解決的核心問題是什麼？
@@ -85,7 +101,7 @@ SUMMARY_PROMPT_ZH = """\
 - 未來研究方向為何？
 
 請使用條列與清楚的小標題呈現，每一部分簡潔但具體。
-如果原文未明確說明某一點，請標註「未明確說明」，不要自行臆測。
+如果原文未明確說明某一點，請標註「未明確說明 / Not explicitly stated」，不要自行臆測。
 
 ---
 論文內容：
