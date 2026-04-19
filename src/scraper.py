@@ -325,6 +325,9 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
         "content": "http://purl.org/rss/1.0/modules/content/",
         "prism": "http://prismstandard.org/namespaces/basic/2.0/",
         "atom": "http://www.w3.org/2005/Atom",
+        # RSS 1.0 default namespace — Nature and other RDF feeds put
+        # <title>/<link>/<description> in this namespace.
+        "rss": "http://purl.org/rss/1.0/",
     }
 
     # Handle RSS 2.0 (<item>), RSS 1.0 / RDF (also <item> but in rdf namespace),
@@ -343,8 +346,19 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
 
     articles = []
     for item in items:
-        title = _xml_text(item, "title") or _xml_text(item, "atom:title", nsmap) or "Untitled"
-        link = _xml_text(item, "link") or ""
+        # Title: try no-namespace (RSS 2.0), rss: (RSS 1.0/RDF like Nature),
+        # then atom: (Atom feeds).
+        title = (
+            _xml_text(item, "title") or
+            _xml_text(item, "rss:title", nsmap) or
+            _xml_text(item, "atom:title", nsmap) or
+            "Untitled"
+        )
+        link = (
+            _xml_text(item, "link") or
+            _xml_text(item, "rss:link", nsmap) or
+            ""
+        )
         if not link:
             # Atom uses <link href="..."/>
             link_el = item.find("atom:link", nsmap)
@@ -387,6 +401,7 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
         # Description / abstract
         description = (
             _xml_text(item, "description") or
+            _xml_text(item, "rss:description", nsmap) or
             _xml_text(item, "content:encoded", nsmap) or
             _xml_text(item, "atom:summary", nsmap) or
             ""
