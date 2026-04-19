@@ -21,22 +21,27 @@
     <div class="rcode-actions">
       <button class="btn btn-primary btn-sm" onclick="copyCode()">複製程式碼</button>
       <button class="btn btn-outline btn-sm" onclick="downloadCode()">下載 .R 檔案</button>
+      <button class="btn btn-secondary btn-sm" id="btn-regen" onclick="regenerateRCode()">
+        重新產製 R 程式碼
+      </button>
     </div>
   </div>
 
-  {% if r_code %}
   <div class="rcode-description">
     <p>以下 R 程式碼根據論文的資料結構、變項定義與統計方法自動產生，包含模擬數據與模型分析。
     可直接在 RStudio 或 R console 中執行。</p>
   </div>
 
-  <div class="rcode-block">
+  <!-- Regeneration status message -->
+  <div id="regen-status" class="regen-status hidden"></div>
+
+  {% if r_code %}
+  <div class="rcode-block" id="rcode-block">
     <pre><code id="r-code-content" class="language-r">{{ r_code }}</code></pre>
   </div>
   {% else %}
-  <div class="empty-state">
-    <p>尚未產生 R 模擬程式碼。請先執行摘要任務。</p>
-    <a href="/" class="btn btn-primary">前往儀表板</a>
+  <div class="empty-state" id="rcode-empty">
+    <p>尚未產生 R 模擬程式碼。點擊上方「重新產製 R 程式碼」按鈕產生。</p>
   </div>
   {% endif %}
 </section>
@@ -71,6 +76,64 @@ function downloadCode() {
   a.download = '{{ doi_suffix }}_simulation.R';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function regenerateRCode() {
+  const btn = document.getElementById('btn-regen');
+  const status = document.getElementById('regen-status');
+
+  btn.disabled = true;
+  btn.textContent = '產製中...（可能需要 30-60 秒）';
+  status.className = 'regen-status regen-loading';
+  status.textContent = '正在呼叫 API 重新產製 R 模擬程式碼，請稍候...';
+
+  fetch('/api/regenerate-rcode/{{ journal_key }}/{{ doi_suffix }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ backend: 'openai' }),
+  })
+    .then(r => r.json())
+    .then(data => {
+      btn.disabled = false;
+      btn.textContent = '重新產製 R 程式碼';
+
+      if (data.error) {
+        status.className = 'regen-status regen-error';
+        status.textContent = '錯誤：' + data.error;
+        return;
+      }
+
+      status.className = 'regen-status regen-success';
+      status.textContent = '產製完成！程式碼已更新。';
+
+      // Update the code block in-place
+      let codeEl = document.getElementById('r-code-content');
+      let blockEl = document.getElementById('rcode-block');
+      let emptyEl = document.getElementById('rcode-empty');
+
+      if (!blockEl) {
+        // Was empty — create the code block
+        if (emptyEl) emptyEl.remove();
+        const section = document.querySelector('.card');
+        const div = document.createElement('div');
+        div.className = 'rcode-block';
+        div.id = 'rcode-block';
+        div.innerHTML = '<pre><code id="r-code-content" class="language-r"></code></pre>';
+        section.appendChild(div);
+        codeEl = document.getElementById('r-code-content');
+      }
+
+      codeEl.textContent = data.r_code;
+      // Re-apply syntax highlighting
+      codeEl.removeAttribute('data-highlighted');
+      hljs.highlightElement(codeEl);
+    })
+    .catch(err => {
+      btn.disabled = false;
+      btn.textContent = '重新產製 R 程式碼';
+      status.className = 'regen-status regen-error';
+      status.textContent = '請求失敗：' + err;
+    });
 }
 </script>
 {% endblock %}

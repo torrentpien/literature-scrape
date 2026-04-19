@@ -101,15 +101,43 @@ SUMMARY_PROMPT_ZH = """\
 
 ## 9. R 模擬重製程式碼（R Simulation Code）
 
-**僅針對量化研究**：如果本論文是**純量化研究**或**量化＋質化混合研究**，請根據量化部分的資料結構、變項定義與統計模型，產出一段完整且可直接執行的 R 程式碼，包含以下兩部分：
+**僅針對量化研究**：如果本論文是**純量化研究**或**量化＋質化混合研究**，請根據量化部分產出一段**完整且可直接執行**的 R 程式碼。
 
-**（a）模擬數據**：根據論文的變項、樣本量、資料特性，產製模擬數據（simulated data），變項名稱與論文一致。
+### 模擬數據要求：
+- 盡可能涵蓋**論文中提到的所有變項**，包括但不限於：
+  - 依變項（dependent variables）
+  - 核心自變項（key independent variables）
+  - 控制變項（control variables）：如性別、年齡、教育程度、收入、種族、地區等
+  - 工具變項（instrumental variables，若有使用）
+  - 固定效應識別變項（如個體 ID、時間、地區等）
+  - 交互作用項（interaction terms，若有）
+  - 權重變項（sampling weights，若有）
+- 變項名稱盡量與論文中使用的名稱一致
+- 樣本量 (N) 盡量符合論文描述
+- 依變項和自變項的分佈類型要合理（如連續、二元、計數、有序等）
+- 使用 `set.seed()` 確保可重複
 
-**（b）統計模型**：使用論文中的分析方法（如 OLS、logistic regression、fixed effects、multilevel model 等）對模擬數據進行分析，並印出模型結果摘要。
+### 統計模型要求：
+- 使用論文中**實際採用**的統計模型與 R 函數，例如：
+  - OLS 回歸 → `lm()`
+  - Logistic 回歸 → `glm(..., family = binomial)`
+  - Negative binomial → `MASS::glm.nb()`
+  - 個體固定效應 → `plm::plm(..., model = "within")`
+  - 雙向固定效應 → `plm::plm(..., effect = "twoways")` 或 `lfe::felm(y ~ x | id + year)`
+  - 多層次模型 → `lme4::lmer()` 或 `lme4::glmer()`
+  - 工具變項 → `AER::ivreg()` 或 `lfe::felm(y ~ x1 | fe | x2 ~ z)`
+  - 傾向分數配對 → `MatchIt::matchit()`
+  - 差異中之差異 → `did::att_gt()` 或帶交互項的 `lm()`/`plm()`
+  - SEM → `lavaan::sem()`
+  - 存活分析 → `survival::coxph()`
+- 如果論文有多個模型（如 Model 1, 2, 3），請**全部產製**
+- 模型估計結束後，用 `summary()` 印出結果
+- 程式碼開頭列出需要安裝的套件（`library(...)` 行）
+- 每一步驟加上中文註解
 
-請將完整 R 程式碼放在 ```r ... ``` 的 code block 中。程式碼中請加上中文註解說明每一步驟。
+請將完整 R 程式碼放在 ```r ... ``` 的 code block 中。
 
-**若本論文是純質化研究**（如民族誌、深度訪談、論述分析、個案研究等，沒有統計模型），請直接寫一句話說明：
+**若本論文是純質化研究**（如民族誌、深度訪談、論述分析、個案研究等，沒有統計模型），請直接寫：
 
 > 本研究為質化研究，不涉及統計模型，因此無需產製 R 模擬程式碼。
 > This is a qualitative study without statistical models; R simulation code is not applicable.
@@ -509,6 +537,119 @@ def summarize(article: Article, paper: ExtractedPaper, lang: str = "zh",
     if b == "claude":
         return summarize_with_claude(article, paper, lang=lang)
     return summarize_local(article, paper)
+
+
+# ── R code regeneration (single article) ──────────────────────────────────
+
+RCODE_PROMPT = """\
+你是一位精通 R 語言和計量社會科學的研究方法專家。
+
+以下是一篇學術論文的內容。請根據你對這篇論文的資料結構、變項定義與統計方法的理解，產出一段**完整且可直接在 R 中執行**的模擬程式碼。
+
+論文基本資訊：
+- 標題：{title}
+- 作者：{authors}
+- 期刊：{journal}
+
+### 模擬數據要求：
+- 涵蓋論文中提到的**所有變項**，包括：
+  - 依變項（dependent variables）
+  - 核心自變項（key independent variables）
+  - 控制變項（control variables）：如性別、年齡、教育程度、收入、種族、地區、婚姻狀態等
+  - 工具變項（instrumental variables，若有使用）
+  - 固定效應識別變項（如個體 ID、時間、地區等）
+  - 交互作用項（interaction terms，若有）
+  - 權重變項（sampling weights，若有）
+- 變項名稱與論文一致
+- 樣本量 (N) 符合論文描述
+- 各變項的分佈類型合理（連續、二元、計數、有序等）
+- 使用 `set.seed()` 確保可重複
+
+### 統計模型要求：
+- 使用論文中**實際採用**的統計模型和 R 函數：
+  - OLS → `lm()`
+  - Logistic → `glm(..., family = binomial)`
+  - Negative binomial → `MASS::glm.nb()`
+  - 個體固定效應 → `plm::plm(..., model = "within")`
+  - 雙向固定效應 → `plm::plm(..., effect = "twoways")` 或 `lfe::felm(y ~ x | id + year)`
+  - 多層次模型 → `lme4::lmer()` / `lme4::glmer()`
+  - 工具變項 → `AER::ivreg()` 或 `lfe::felm(y ~ x1 | fe | x2 ~ z)`
+  - 傾向分數配對 → `MatchIt::matchit()`
+  - DID → `did::att_gt()` 或帶交互項的 `lm()`/`plm()`
+  - SEM → `lavaan::sem()`
+  - 存活分析 → `survival::coxph()`
+- 如果論文有多個模型（如 Model 1, 2, 3），**全部產製**
+- 用 `summary()` 印出每個模型的結果
+- 開頭列出所有 `library()` 指令
+- 每一步加中文註解
+
+請將完整程式碼放在 ```r ... ``` 的 code block 中。
+
+如果這是純質化研究，請回覆：「本研究為質化研究，無需 R 模擬程式碼。」
+
+---
+論文內容：
+{text}
+"""
+
+
+def regenerate_r_code(article: Article, paper: ExtractedPaper,
+                       backend: str | None = None) -> str:
+    """
+    Regenerate ONLY the R simulation code for a single article.
+    Uses a dedicated prompt focused entirely on code quality.
+    Returns the extracted R code string.
+    """
+    b = (backend or SUMMARIZER_BACKEND or "openai").lower()
+    text = get_relevant_text(paper, max_chars=60000 if b == "openai" else 28000)
+
+    prompt = RCODE_PROMPT.format(
+        title=article.title,
+        authors=", ".join(article.authors),
+        journal=article.journal,
+        text=text,
+    )
+
+    raw = ""
+    if b == "openai":
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            logger.info(f"Regenerating R code via OpenAI: {article.title[:60]}...")
+            response = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content":
+                     "You are an expert in R programming and quantitative social science methods. "
+                     "Produce complete, runnable R code with simulated data and statistical models."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+                max_tokens=8192,
+            )
+            raw = response.choices[0].message.content or ""
+        except Exception as e:
+            logger.error(f"OpenAI error: {e}")
+            return ""
+    elif b == "claude":
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            logger.info(f"Regenerating R code via Claude: {article.title[:60]}...")
+            response = client.messages.create(
+                model=ANTHROPIC_MODEL,
+                max_tokens=8192,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text
+        except Exception as e:
+            logger.error(f"Claude error: {e}")
+            return ""
+    else:
+        logger.warning("R code regeneration requires an API backend (openai or claude)")
+        return ""
+
+    return _extract_r_code(raw)
 
 
 # ── Save / format ─────────────────────────────────────────────────────────

@@ -587,6 +587,18 @@ select:focus, input[type="text"]:focus {
   color: var(--color-info);
 }
 
+.regen-status {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  font-size: 0.88rem;
+}
+
+.regen-status.hidden { display: none; }
+.regen-loading { background: var(--color-info-light); color: var(--color-info); }
+.regen-success { background: var(--color-success-light); color: var(--color-success); }
+.regen-error { background: #fef2f2; color: var(--color-danger); }
+
 .rcode-block {
   background: #f6f8fa;
   border: 1px solid var(--color-border);
