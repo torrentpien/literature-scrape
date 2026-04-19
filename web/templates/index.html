@@ -22,7 +22,8 @@
     <div class="control-group">
       <label for="sel-backend">摘要方式</label>
       <select id="sel-backend">
-        <option value="claude">Claude API（高品質）</option>
+        <option value="openai">OpenAI GPT（推薦）</option>
+        <option value="claude">Anthropic Claude</option>
         <option value="local">本地規則（免 API Key）</option>
       </select>
     </div>
@@ -33,11 +34,20 @@
         <option value="en">English</option>
       </select>
     </div>
-    <div class="control-group control-group--btn">
-      <button id="btn-run" class="btn btn-primary" onclick="startPipeline()">
-        開始抓取
-      </button>
-    </div>
+  </div>
+
+  <div class="control-actions">
+    <button id="btn-run" class="btn btn-primary" onclick="startPipeline()">
+      完整流程（抓取 → 下載 → 摘要）
+    </button>
+    <button id="btn-summarize" class="btn btn-secondary" onclick="startSummarizeOnly()"
+            title="使用 output/pdfs 中已下載的 PDF，跳過抓取與下載，直接產生摘要">
+      只產生摘要（不重抓 PDF）
+    </button>
+    <label class="checkbox-inline" title="勾選後會覆蓋已存在的摘要">
+      <input type="checkbox" id="chk-force">
+      <span>強制重新摘要已有的文章</span>
+    </label>
   </div>
 
   <!-- Progress bar (hidden until running) -->

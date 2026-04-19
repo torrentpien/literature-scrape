@@ -128,69 +128,129 @@ def get_article_status(journal_key: str, doi: str) -> dict:
 
 
 # ── Background pipeline runner ────────────────────────────────────────────
-def run_pipeline_bg(journal_key: str, backend: str = "claude", lang: str = "zh"):
-    """Run the full pipeline in a background thread."""
+def run_pipeline_bg(journal_key: str, backend: str = "openai", lang: str = "zh",
+                     skip_download: bool = False, force: bool = False):
+    """Run the pipeline in a background thread.
+
+    Args:
+        journal_key: which journal to process
+        backend: "openai" | "claude" | "local"
+        lang: "zh" | "en"
+        skip_download: if True, use existing PDFs only (skip fetch + download)
+        force: if True, re-generate summaries even if they already exist
+    """
     import config
     config.SUMMARIZER_BACKEND = backend
 
     try:
-        # Phase 1: Fetch metadata
-        _update_state(
-            running=True, journal=journal_key, phase="fetching",
-            progress=5, current_title="正在從 API 取得文章列表...",
-            error=None, log=[]
-        )
-        _add_log(f"開始抓取 {JOURNALS[journal_key]['name']} 最新文章...")
-
-        articles = fetch_latest_issue(journal_key, max_articles=20)
-        if not articles:
-            _update_state(phase="error", running=False, error="未找到任何文章，請檢查網路連線。")
-            return
-
-        save_metadata(articles, journal_key)
-        _update_state(
-            total_articles=len(articles), progress=15,
-            phase="downloading"
-        )
-        _add_log(f"找到 {len(articles)} 篇文章，開始下載 PDF...")
-
-        # Phase 2: Download PDFs
         journal_pdf_dir = PDF_DIR / journal_key
-        journal_pdf_dir.mkdir(exist_ok=True)
-
-        downloaded = {}
-        for i, article in enumerate(articles, 1):
-            pct = 15 + int(45 * i / len(articles))
-            _update_state(
-                current_article=i, progress=pct,
-                current_title=f"下載中：{article.title[:50]}..."
-            )
-            _add_log(f"[{i}/{len(articles)}] 下載：{article.title[:60]}")
-
-            from src.downloader import download_pdf
-            path = download_pdf(article, output_dir=journal_pdf_dir)
-            if path:
-                downloaded[article.doi] = path
-            time.sleep(1)
-
-        _add_log(f"下載完成：{len(downloaded)}/{len(articles)} 篇")
-
-        # Phase 3: Summarize
-        _update_state(phase="summarizing", progress=65)
-        _add_log("開始產生摘要...")
-
+        journal_pdf_dir.mkdir(parents=True, exist_ok=True)
         journal_summary_dir = SUMMARY_DIR / journal_key
-        journal_summary_dir.mkdir(exist_ok=True)
+        journal_summary_dir.mkdir(parents=True, exist_ok=True)
+
+        if skip_download:
+            # Summarize-only mode: use existing metadata + PDFs
+            _update_state(
+                running=True, journal=journal_key, phase="summarizing",
+                progress=5, current_title="載入已下載的 PDF...",
+                error=None, log=[]
+            )
+            _add_log(f"[摘要模式] 載入 {JOURNALS[journal_key]['name']} 已有資料...")
+
+            articles_data = load_metadata(journal_key)
+            if not articles_data:
+                _update_state(phase="error", running=False,
+                              error="找不到文章 metadata。請先執行完整抓取流程。")
+                return
+
+            from src.scraper import Article
+            articles = []
+            downloaded = {}
+            for a in articles_data:
+                article = Article(
+                    title=a.get("title", ""),
+                    authors=a.get("authors", []),
+                    doi=a.get("doi", ""),
+                    journal=a.get("journal", ""),
+                    volume=a.get("volume", ""),
+                    issue=a.get("issue", ""),
+                    pages=a.get("pages", ""),
+                    publication_date=a.get("publication_date", ""),
+                    abstract=a.get("abstract", ""),
+                    pdf_url=a.get("pdf_url", ""),
+                    landing_url=a.get("landing_url", ""),
+                )
+                articles.append(article)
+                # Look up the PDF file
+                pdf_path = journal_pdf_dir / article.pdf_filename
+                if pdf_path.exists():
+                    downloaded[article.doi] = pdf_path
+
+            _add_log(f"找到 {len(articles)} 篇文章，其中 {len(downloaded)} 篇有 PDF")
+            _update_state(total_articles=len(articles), progress=15)
+
+            if not downloaded:
+                _update_state(phase="error", running=False,
+                              error="output/pdfs/ 中沒有任何已下載的 PDF")
+                return
+
+        else:
+            # Full pipeline: fetch metadata → download PDFs → summarize
+            _update_state(
+                running=True, journal=journal_key, phase="fetching",
+                progress=5, current_title="正在從 API 取得文章列表...",
+                error=None, log=[]
+            )
+            _add_log(f"開始抓取 {JOURNALS[journal_key]['name']} 最新文章...")
+
+            articles = fetch_latest_issue(journal_key, max_articles=20)
+            if not articles:
+                _update_state(phase="error", running=False,
+                              error="未找到任何文章，請檢查網路連線。")
+                return
+
+            save_metadata(articles, journal_key)
+            _update_state(
+                total_articles=len(articles), progress=15,
+                phase="downloading"
+            )
+            _add_log(f"找到 {len(articles)} 篇文章，開始下載 PDF...")
+
+            # Phase: Download PDFs
+            downloaded = {}
+            for i, article in enumerate(articles, 1):
+                pct = 15 + int(45 * i / len(articles))
+                _update_state(
+                    current_article=i, progress=pct,
+                    current_title=f"下載中：{article.title[:50]}..."
+                )
+                _add_log(f"[{i}/{len(articles)}] 下載：{article.title[:60]}")
+
+                from src.downloader import download_pdf
+                path = download_pdf(article, output_dir=journal_pdf_dir)
+                if path:
+                    downloaded[article.doi] = path
+                time.sleep(1)
+
+            _add_log(f"下載完成：{len(downloaded)}/{len(articles)} 篇")
+
+        # Phase: Summarize
+        _update_state(phase="summarizing", progress=65)
+        _add_log(f"開始使用 {backend.upper()} 產生摘要...")
 
         summarized = 0
+        total_with_pdf = len(downloaded)
         for i, article in enumerate(articles, 1):
             pdf_path = downloaded.get(article.doi)
             if not pdf_path:
+                _add_log(f"[{i}/{len(articles)}] 略過（無 PDF）：{article.title[:50]}")
                 continue
 
             doi_suffix = article.doi.split("/")[-1] if article.doi else ""
-            if (journal_summary_dir / f"{doi_suffix}.json").exists():
+            existing = journal_summary_dir / f"{doi_suffix}.json"
+            if existing.exists() and not force:
                 summarized += 1
+                _add_log(f"[{i}/{len(articles)}] 略過（已摘要）：{article.title[:50]}")
                 continue
 
             pct = 65 + int(30 * i / len(articles))
@@ -202,11 +262,11 @@ def run_pipeline_bg(journal_key: str, backend: str = "claude", lang: str = "zh")
 
             paper = extract_text_from_pdf(pdf_path)
             if paper.full_text:
-                summary = summarize(article, paper, lang=lang)
+                summary = summarize(article, paper, lang=lang, backend=backend)
                 save_summary(summary, output_dir=journal_summary_dir)
                 summarized += 1
-                if backend == "claude":
-                    time.sleep(2)
+                if backend in ("claude", "openai"):
+                    time.sleep(1)
 
         _update_state(phase="done", progress=100, running=False,
                       current_title="完成！")
@@ -306,7 +366,7 @@ def api_run():
     """Trigger the full pipeline for a journal."""
     data = request.json or {}
     journal_key = data.get("journal", "asr")
-    backend = data.get("backend", "claude")
+    backend = data.get("backend", "openai")
     lang = data.get("lang", "zh")
 
     if journal_key not in JOURNALS:
@@ -318,11 +378,43 @@ def api_run():
 
     thread = threading.Thread(
         target=run_pipeline_bg,
-        args=(journal_key, backend, lang),
+        kwargs={"journal_key": journal_key, "backend": backend, "lang": lang,
+                "skip_download": False, "force": False},
         daemon=True,
     )
     thread.start()
     return jsonify({"status": "started", "journal": journal_key})
+
+
+@app.route("/api/summarize-only", methods=["POST"])
+def api_summarize_only():
+    """
+    Summarize-only mode: use PDFs already in output/pdfs/ and skip download.
+    Useful when downloads succeeded but you want to re-run summarization
+    (e.g., to switch backend or use a new prompt).
+    """
+    data = request.json or {}
+    journal_key = data.get("journal", "asr")
+    backend = data.get("backend", "openai")
+    lang = data.get("lang", "zh")
+    force = bool(data.get("force", False))
+
+    if journal_key not in JOURNALS:
+        return jsonify({"error": "Unknown journal"}), 400
+
+    with state_lock:
+        if pipeline_state["running"]:
+            return jsonify({"error": "Pipeline already running"}), 409
+
+    thread = threading.Thread(
+        target=run_pipeline_bg,
+        kwargs={"journal_key": journal_key, "backend": backend, "lang": lang,
+                "skip_download": True, "force": force},
+        daemon=True,
+    )
+    thread.start()
+    return jsonify({"status": "started", "mode": "summarize-only",
+                    "journal": journal_key})
 
 
 @app.route("/api/status")

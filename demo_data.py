@@ -67,12 +67,14 @@ DEMO_SUMMARY = {
     "volume": "74",
     "issue": "2",
     "publication_date": "2025-04",
-    "research_question": "為什麼在過去35年間，美國女性在客觀生活條件（教育、就業、薪資）明顯改善的情況下，主觀幸福感卻出現下降？女性幸福感的下降是絕對性的，還是相對於男性而言的？這種趨勢是否跨越不同年齡、種族、教育程度和婚姻狀態的群體？",
-    "theoretical_framework": "本文建立在主觀幸福感（subjective well-being）研究的基礎上，結合了 Easterlin 的「幸福悖論」概念。理論上探討了三種可能的解釋路徑：(1) 女性運動提高了期望值，導致期望與現實的落差擴大；(2) 工作與家庭的雙重負擔（second shift）假說；(3) 社會比較對象的變化——女性不再只與其他女性比較，而是開始與男性比較。",
-    "data": "使用美國 General Social Survey (GSS) 1972-2006 年的資料，以及歐洲 Eurobarometer 1975-2006 年的跨國調查資料。GSS 樣本涵蓋超過 50,000 名受訪者，Eurobarometer 涵蓋歐盟各國。主要依變項為自評幸福感（happiness）的三點量表。",
-    "methods": "採用有序 probit 迴歸模型（ordered probit），控制年齡、教育、收入、婚姻狀態、種族、子女數等變項。進行次群體分析以檢驗趨勢的穩健性。使用跨國比較作為外部效度驗證。以世代分析（cohort analysis）區分年齡效應與世代效應。",
-    "key_findings": "1. 1970年代以來，美國女性的主觀幸福感持續下降，無論絕對值或相對於男性。\n2. 這一趨勢在不同年齡、種族、教育程度和婚姻狀態的女性群體中都成立。\n3. 歐洲資料也呈現類似的趨勢，排除了純粹美國特殊性的解釋。\n4. 1970年代女性的幸福感高於男性，但到2000年代已低於男性（性別幸福感差距逆轉）。\n5. 客觀指標的改善與主觀幸福感的下降形成鮮明對比。",
-    "contribution": "本文提出了一個重要的經驗事實挑戰：社會進步（尤其是性別平等的推進）不必然帶來主觀福祉的提升。這對公共政策的意涵在於，不能僅依靠客觀指標衡量社會進步，需要同時關注主觀幸福感。理論上，本文為「期望理論」（aspiration theory）和社會比較理論在性別研究中的應用提供了實證基礎。",
+    "research_question": "- 核心問題：為什麼在過去 35 年間，美國女性在客觀生活條件（教育、就業、薪資）明顯改善的情況下，主觀幸福感反而下降？\n- 研究動機：檢驗女性運動與性別平權的推進是否帶來主觀福祉提升。",
+    "theoretical_context": "- 回應 Easterlin 的「幸福悖論」，將其應用到性別研究。\n- 挑戰傳統「進步必然伴隨幸福感提升」的預設。\n- 與 Dolan et al. (2008) 的主觀幸福感文獻對話。",
+    "theoretical_framework": "- 主觀幸福感（subjective well-being）作為核心概念。\n- 三種解釋機制：(1) 期望理論 — 運動提高期望，現實跟不上；(2) 第二輪班 (second shift) — 工作家庭雙重負擔；(3) 參照群體變化 — 比較對象從女性擴展到男性。",
+    "data_source": "- GSS (General Social Survey, 美國) 1972–2006，N > 50,000。\n- Eurobarometer 1975–2006，歐盟各國。\n- 主要變項：自評幸福感（三點量表）、教育、就業、婚姻、子女。",
+    "model_methodology": "- 方法論：量化分析。\n- 模型：有序 probit 迴歸 (ordered probit)。\n- 穩健性：按年齡、教育、族群分組；以世代分析 (cohort analysis) 區分年齡 vs. 世代效應。\n- 外部效度：跨國比較（美 vs. 歐）。",
+    "findings": "- 1970 年代起，美國女性幸福感持續下降，絕對與相對皆然。\n- 趨勢跨年齡、種族、教育、婚姻穩定存在。\n- 歐洲出現類似趨勢，排除美國特殊性。\n- 性別幸福感差距逆轉：1970s 女 > 男；2000s 男 > 女。",
+    "conclusion_contribution": "- 結論：客觀指標的改善 ≠ 主觀福祉提升。\n- 理論貢獻：為期望理論與社會比較理論提供性別向度的實證。\n- 政策意涵：社會進步衡量需同時納入主觀福祉。",
+    "limitations": "- 未明確說明因果機制，僅呈現實證相關。\n- 未來研究：應追蹤個體層次的世代資料以分離機制。",
     "raw_summary": "[Demo data]",
 }
 
@@ -109,25 +111,33 @@ def main():
 
 {DEMO_SUMMARY['research_question']}
 
-## 2. 理論框架 (Theoretical Framework)
+## 2. 對話的理論脈絡 (Theoretical Context)
+
+{DEMO_SUMMARY['theoretical_context']}
+
+## 3. 理論架構 (Theoretical Framework)
 
 {DEMO_SUMMARY['theoretical_framework']}
 
-## 3. 資料來源 (Data)
+## 4. 資料來源 (Data Source)
 
-{DEMO_SUMMARY['data']}
+{DEMO_SUMMARY['data_source']}
 
-## 4. 研究方法 (Methods)
+## 5. 研究模型與方法 (Model & Methodology)
 
-{DEMO_SUMMARY['methods']}
+{DEMO_SUMMARY['model_methodology']}
 
-## 5. 主要發現 (Key Findings)
+## 6. 模型結果 (Findings / Results)
 
-{DEMO_SUMMARY['key_findings']}
+{DEMO_SUMMARY['findings']}
 
-## 6. 學術貢獻 (Contribution)
+## 7. 重要結論與貢獻 (Conclusion & Contribution)
 
-{DEMO_SUMMARY['contribution']}
+{DEMO_SUMMARY['conclusion_contribution']}
+
+## 8. 限制與未來研究 (Limitations & Future Research)
+
+{DEMO_SUMMARY['limitations']}
 """
     md_path.write_text(md_content, encoding="utf-8")
     print(f"  Saved: {md_path}")

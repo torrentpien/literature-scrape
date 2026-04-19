@@ -81,7 +81,7 @@
     <div class="summary-block">
       <div class="summary-block-header">
         <span class="summary-block-icon">&#x2753;</span>
-        <h3>研究問題</h3>
+        <h3>1. 研究問題 (Research Question)</h3>
       </div>
       <div class="summary-block-content">
         {{ summary.research_question or 'N/A' }}
@@ -90,8 +90,18 @@
 
     <div class="summary-block">
       <div class="summary-block-header">
+        <span class="summary-block-icon">&#x1F4DA;</span>
+        <h3>2. 對話的理論脈絡 (Theoretical Context)</h3>
+      </div>
+      <div class="summary-block-content">
+        {{ summary.theoretical_context or 'N/A' }}
+      </div>
+    </div>
+
+    <div class="summary-block">
+      <div class="summary-block-header">
         <span class="summary-block-icon">&#x1F4D6;</span>
-        <h3>理論框架</h3>
+        <h3>3. 理論架構 (Theoretical Framework)</h3>
       </div>
       <div class="summary-block-content">
         {{ summary.theoretical_framework or 'N/A' }}
@@ -101,40 +111,50 @@
     <div class="summary-block">
       <div class="summary-block-header">
         <span class="summary-block-icon">&#x1F4CA;</span>
-        <h3>資料來源</h3>
+        <h3>4. 資料來源 (Data Source)</h3>
       </div>
       <div class="summary-block-content">
-        {{ summary.data or 'N/A' }}
+        {{ summary.data_source or 'N/A' }}
       </div>
     </div>
 
     <div class="summary-block">
       <div class="summary-block-header">
         <span class="summary-block-icon">&#x1F527;</span>
-        <h3>研究方法</h3>
+        <h3>5. 研究模型與方法 (Model & Methodology)</h3>
       </div>
       <div class="summary-block-content">
-        {{ summary.methods or 'N/A' }}
+        {{ summary.model_methodology or 'N/A' }}
       </div>
     </div>
 
     <div class="summary-block">
       <div class="summary-block-header">
         <span class="summary-block-icon">&#x2B50;</span>
-        <h3>主要發現</h3>
+        <h3>6. 模型結果 (Findings / Results)</h3>
       </div>
       <div class="summary-block-content">
-        {{ summary.key_findings or 'N/A' }}
+        {{ summary.findings or 'N/A' }}
       </div>
     </div>
 
     <div class="summary-block">
       <div class="summary-block-header">
         <span class="summary-block-icon">&#x1F3AF;</span>
-        <h3>學術貢獻</h3>
+        <h3>7. 重要結論與貢獻 (Conclusion & Contribution)</h3>
       </div>
       <div class="summary-block-content">
-        {{ summary.contribution or 'N/A' }}
+        {{ summary.conclusion_contribution or 'N/A' }}
+      </div>
+    </div>
+
+    <div class="summary-block">
+      <div class="summary-block-header">
+        <span class="summary-block-icon">&#x26A0;</span>
+        <h3>8. 限制與未來研究 (Limitations & Future Research)</h3>
+      </div>
+      <div class="summary-block-content">
+        {{ summary.limitations or 'N/A' }}
       </div>
     </div>
   </div>

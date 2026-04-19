@@ -14,26 +14,35 @@ const PHASE_LABELS = {
   error: "錯誤",
 };
 
+function _collectParams() {
+  return {
+    journal: document.getElementById("sel-journal").value,
+    backend: document.getElementById("sel-backend").value,
+    lang: document.getElementById("sel-lang").value,
+    force: (document.getElementById("chk-force") || {}).checked || false,
+  };
+}
+
+function _setButtonsDisabled(disabled) {
+  const ids = ["btn-run", "btn-summarize"];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = disabled;
+  });
+}
+
 function startPipeline() {
-  const journal = document.getElementById("sel-journal").value;
-  const backend = document.getElementById("sel-backend").value;
-  const lang = document.getElementById("sel-lang").value;
-  const btn = document.getElementById("btn-run");
-
-  btn.disabled = true;
-  btn.textContent = "執行中...";
-
+  _setButtonsDisabled(true);
   fetch("/api/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ journal, backend, lang }),
+    body: JSON.stringify(_collectParams()),
   })
     .then((r) => r.json())
     .then((data) => {
       if (data.error) {
         alert(data.error);
-        btn.disabled = false;
-        btn.textContent = "開始抓取";
+        _setButtonsDisabled(false);
         return;
       }
       showProgress();
@@ -41,8 +50,30 @@ function startPipeline() {
     })
     .catch((err) => {
       alert("啟動失敗：" + err);
-      btn.disabled = false;
-      btn.textContent = "開始抓取";
+      _setButtonsDisabled(false);
+    });
+}
+
+function startSummarizeOnly() {
+  _setButtonsDisabled(true);
+  fetch("/api/summarize-only", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(_collectParams()),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) {
+        alert(data.error);
+        _setButtonsDisabled(false);
+        return;
+      }
+      showProgress();
+      startPolling();
+    })
+    .catch((err) => {
+      alert("啟動失敗：" + err);
+      _setButtonsDisabled(false);
     });
 }
 
@@ -64,11 +95,7 @@ function pollStatus() {
       if (!state.running) {
         clearInterval(pollInterval);
         pollInterval = null;
-        const btn = document.getElementById("btn-run");
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = "開始抓取";
-        }
+        _setButtonsDisabled(false);
         // Auto-reload after done
         if (state.phase === "done") {
           setTimeout(() => location.reload(), 1500);
@@ -127,11 +154,7 @@ document.addEventListener("DOMContentLoaded", () => {
         showProgress();
         updateProgressUI(state);
         startPolling();
-        const btn = document.getElementById("btn-run");
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = "執行中...";
-        }
+        _setButtonsDisabled(true);
       }
     })
     .catch(() => {});

@@ -9,6 +9,21 @@ from pathlib import Path
 
 # ── Project paths ──────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
+
+# Auto-load .env file if present (so API keys in .env work without explicit
+# `export` or a separate dotenv library)
+_env_file = BASE_DIR / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        _key, _, _val = _line.partition("=")
+        _key = _key.strip()
+        _val = _val.strip().strip("'\"")
+        # Don't override existing environment variables
+        if _key and _key not in os.environ:
+            os.environ[_key] = _val
 OUTPUT_DIR = BASE_DIR / "output"
 PDF_DIR = OUTPUT_DIR / "pdfs"
 SUMMARY_DIR = OUTPUT_DIR / "summaries"
@@ -79,11 +94,17 @@ MAX_RETRIES = 3
 REQUEST_TIMEOUT = 60
 
 # ── Summarization settings ────────────────────────────────────────────────
-# Choose summarization backend: "claude" or "local"
-# - "claude": uses Anthropic Claude API (requires ANTHROPIC_API_KEY env var)
-# - "local": rule-based extraction (no API key needed, lower quality)
-SUMMARIZER_BACKEND = os.getenv("SUMMARIZER_BACKEND", "claude")
+# Choose summarization backend:
+# - "openai" (default): OpenAI GPT; requires OPENAI_API_KEY
+# - "claude": Anthropic Claude; requires ANTHROPIC_API_KEY
+# - "local":  rule-based extraction (no API key needed, lower quality)
+SUMMARIZER_BACKEND = os.getenv("SUMMARIZER_BACKEND", "openai")
 
+# OpenAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# Anthropic
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
