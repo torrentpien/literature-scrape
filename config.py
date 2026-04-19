@@ -53,16 +53,20 @@ JOURNALS = {
             "https://journals.sagepub.com/action/showFeed?ui=0&mi=ehikzz&ai=2b4&jc=asra&type=etoc&feed=rss_2_0",
         ],
     },
-    # Add more journals here, e.g.:
-    # "ajs": {
-    #     "name": "American Journal of Sociology",
-    #     "issn": "0002-9602",
-    #     "publisher": "chicago",
-    #     "pdf_base_url": "https://www.journals.uchicago.edu/doi/pdf/{doi}",
-    #     "landing_url": "https://www.journals.uchicago.edu/doi/{doi}",
-    #     "toc_url": "https://www.journals.uchicago.edu/toc/ajs/current",
-    #     "rss_url": "https://www.journals.uchicago.edu/action/showFeed?jc=ajs&type=etoc&feed=rss",
-    # },
+    "ajs": {
+        "name": "American Journal of Sociology",
+        "issn": "0002-9602",
+        "publisher": "uchicago",
+        # University of Chicago Press uses the same Atypon platform as SAGE,
+        # so URL patterns (doi/pdf/..., doi/..., action/showFeed) are parallel.
+        "pdf_base_url": "https://www.journals.uchicago.edu/doi/pdf/{doi}",
+        "landing_url": "https://www.journals.uchicago.edu/doi/{doi}",
+        "toc_url": "https://www.journals.uchicago.edu/toc/ajs/current",
+        "rss_urls": [
+            "https://www.journals.uchicago.edu/action/showFeed?jc=ajs&type=etoc&feed=rss_2_0",
+            "https://www.journals.uchicago.edu/action/showFeed?jc=ajs&type=etoc&feed=rss_1_0",
+        ],
+    },
 }
 
 # ── API settings ──────────────────────────────────────────────────────────
