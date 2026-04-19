@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}R Code — {{ article.title }} — 學術期刊摘要系統{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="breadcrumb">
+    <a href="/">儀表板</a> &rsaquo;
+    <a href="/journal/{{ journal_key }}">{{ journal.name }}</a> &rsaquo;
+    <a href="/article/{{ journal_key }}/{{ doi_suffix }}">文章摘要</a> &rsaquo;
+    <span>R 模擬程式碼</span>
+  </div>
+</div>
+
+<section class="card">
+  <div class="rcode-header">
+    <div>
+      <h1 class="rcode-title">R 模擬重製程式碼</h1>
+      <p class="rcode-subtitle">{{ article.title }}</p>
+      <p class="rcode-meta">{{ article.authors | join(', ') }} &middot; {{ article.doi }}</p>
+    </div>
+    <div class="rcode-actions">
+      <button class="btn btn-primary btn-sm" onclick="copyCode()">複製程式碼</button>
+      <button class="btn btn-outline btn-sm" onclick="downloadCode()">下載 .R 檔案</button>
+    </div>
+  </div>
+
+  {% if r_code %}
+  <div class="rcode-description">
+    <p>以下 R 程式碼根據論文的資料結構、變項定義與統計方法自動產生，包含模擬數據與模型分析。
+    可直接在 RStudio 或 R console 中執行。</p>
+  </div>
+
+  <div class="rcode-block">
+    <pre><code id="r-code-content" class="language-r">{{ r_code }}</code></pre>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p>尚未產生 R 模擬程式碼。請先執行摘要任務。</p>
+    <a href="/" class="btn btn-primary">前往儀表板</a>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<!-- highlight.js for R syntax highlighting -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/r.min.js"></script>
+<script>
+hljs.highlightAll();
+
+function copyCode() {
+  const code = document.getElementById('r-code-content');
+  if (!code) return;
+  navigator.clipboard.writeText(code.textContent).then(() => {
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = '已複製！';
+    setTimeout(() => btn.textContent = orig, 2000);
+  });
+}
+
+function downloadCode() {
+  const code = document.getElementById('r-code-content');
+  if (!code) return;
+  const blob = new Blob([code.textContent], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '{{ doi_suffix }}_simulation.R';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}

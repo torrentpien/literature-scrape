@@ -243,28 +243,65 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
         "Accept-Language": "en-US,en;q=0.9",
     }
 
+    # Try to use curl_cffi for RSS too — Nature's RSS feed is also
+    # behind Cloudflare and will 403 with plain requests.
+    try:
+        from curl_cffi import requests as cffi_requests  # type: ignore
+        _has_cffi = True
+    except ImportError:
+        cffi_requests = None
+        _has_cffi = False
+
+    cffi_targets = ["chrome131", "chrome120", "chrome"]
+
     resp = None
     rss_url = None
     for candidate in urls:
         logger.info(f"Trying RSS: {candidate}")
-        try:
-            r = requests.get(candidate, headers=headers, timeout=REQUEST_TIMEOUT)
-            logger.info(f"  HTTP {r.status_code}, Content-Type={r.headers.get('Content-Type','?')}, "
-                        f"{len(r.content)} bytes")
-            if r.ok and r.content:
-                # Quick sanity check: must look like XML
-                first_bytes = r.content.lstrip()[:200].decode("utf-8", errors="replace")
-                if first_bytes.startswith("<?xml") or first_bytes.lstrip().startswith("<"):
-                    resp = r
-                    rss_url = candidate
-                    break
+
+        # Attempt 1: curl_cffi with browser impersonation (bypasses Cloudflare)
+        if _has_cffi:
+            for target in cffi_targets:
+                try:
+                    r = cffi_requests.get(candidate, impersonate=target,
+                                          timeout=REQUEST_TIMEOUT, allow_redirects=True)
+                    logger.info(f"  ({target}) HTTP {r.status_code}, "
+                                f"Content-Type={r.headers.get('Content-Type','?')}, "
+                                f"{len(r.content)} bytes")
+                    if r.ok and r.content:
+                        first_bytes = r.content.lstrip()[:200].decode("utf-8", errors="replace")
+                        if first_bytes.startswith("<?xml") or first_bytes.lstrip().startswith("<"):
+                            resp = r
+                            rss_url = candidate
+                            break
+                        else:
+                            logger.warning(f"  Not XML. First 100 chars: {first_bytes[:100]!r}")
+                    else:
+                        logger.info(f"  ({target}) HTTP {r.status_code}")
+                except Exception as e:
+                    logger.info(f"  ({target}) error: {e}")
+            if resp:
+                break
+
+        # Attempt 2: plain requests (works for non-Cloudflare sites)
+        if not resp:
+            try:
+                r = requests.get(candidate, headers=headers, timeout=REQUEST_TIMEOUT)
+                logger.info(f"  (requests) HTTP {r.status_code}, "
+                            f"Content-Type={r.headers.get('Content-Type','?')}, "
+                            f"{len(r.content)} bytes")
+                if r.ok and r.content:
+                    first_bytes = r.content.lstrip()[:200].decode("utf-8", errors="replace")
+                    if first_bytes.startswith("<?xml") or first_bytes.lstrip().startswith("<"):
+                        resp = r
+                        rss_url = candidate
+                        break
+                    else:
+                        logger.warning(f"  Not XML. First 100 chars: {first_bytes[:100]!r}")
                 else:
-                    logger.warning(f"  Response does not look like XML. First 100 chars: "
-                                   f"{first_bytes[:100]!r}")
-            else:
-                logger.warning(f"  HTTP {r.status_code} — trying next URL")
-        except requests.RequestException as e:
-            logger.warning(f"  Request failed: {e}")
+                    logger.warning(f"  HTTP {r.status_code} — trying next URL")
+            except requests.RequestException as e:
+                logger.warning(f"  Request failed: {e}")
 
     if resp is None:
         logger.error(f"All RSS URLs failed for {journal_key}")
@@ -373,12 +410,22 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
         volume = _xml_text(item, "prism:volume", nsmap) or ""
         issue = _xml_text(item, "prism:number", nsmap) or ""
 
-        # Build URLs
+        # Build URLs.
+        # Nature uses {article_id} in templates (e.g., "s41558-025-02345-7"),
+        # Atypon publishers use {doi}. We extract the article_id from the DOI
+        # (the part after the prefix like "10.1038/") and provide both placeholders.
         pdf_url = ""
         landing_url = link
         if doi:
-            pdf_url = journal["pdf_base_url"].format(doi=doi)
-            landing_url = journal["landing_url"].format(doi=doi)
+            article_id = doi.split("/", 1)[-1] if "/" in doi else doi
+            try:
+                pdf_url = journal["pdf_base_url"].format(doi=doi, article_id=article_id)
+            except KeyError:
+                pdf_url = journal["pdf_base_url"].format(doi=doi)
+            try:
+                landing_url = journal["landing_url"].format(doi=doi, article_id=article_id)
+            except KeyError:
+                landing_url = journal["landing_url"].format(doi=doi)
 
         articles.append(Article(
             title=title.strip(),
@@ -610,12 +657,23 @@ def fetch_latest_issue(journal_key: str, max_articles: int = 20) -> list[Article
         for article in scrape_atypon_toc(journal_key):
             _merge(article)
 
-    # Ensure all articles have PDF URLs constructed from DOI
+    # Ensure all articles have PDF/landing URLs constructed from DOI.
+    # Nature uses {article_id} (suffix after DOI prefix); Atypon uses {doi}.
     for article in all_articles.values():
-        if not article.pdf_url and article.doi:
-            article.pdf_url = journal["pdf_base_url"].format(doi=article.doi)
-        if not article.landing_url and article.doi:
-            article.landing_url = journal["landing_url"].format(doi=article.doi)
+        if article.doi:
+            article_id = article.doi.split("/", 1)[-1] if "/" in article.doi else article.doi
+            if not article.pdf_url:
+                try:
+                    article.pdf_url = journal["pdf_base_url"].format(
+                        doi=article.doi, article_id=article_id)
+                except KeyError:
+                    article.pdf_url = journal["pdf_base_url"].format(doi=article.doi)
+            if not article.landing_url:
+                try:
+                    article.landing_url = journal["landing_url"].format(
+                        doi=article.doi, article_id=article_id)
+                except KeyError:
+                    article.landing_url = journal["landing_url"].format(doi=article.doi)
 
     articles = list(all_articles.values())
 

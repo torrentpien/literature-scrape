@@ -57,14 +57,26 @@ JOURNALS = {
         "name": "American Journal of Sociology",
         "issn": "0002-9602",
         "publisher": "uchicago",
-        # University of Chicago Press uses the same Atypon platform as SAGE,
-        # so URL patterns (doi/pdf/..., doi/..., action/showFeed) are parallel.
         "pdf_base_url": "https://www.journals.uchicago.edu/doi/pdf/{doi}",
         "landing_url": "https://www.journals.uchicago.edu/doi/{doi}",
         "toc_url": "https://www.journals.uchicago.edu/toc/ajs/current",
         "rss_urls": [
             "https://www.journals.uchicago.edu/action/showFeed?jc=ajs&type=etoc&feed=rss_2_0",
             "https://www.journals.uchicago.edu/action/showFeed?jc=ajs&type=etoc&feed=rss_1_0",
+        ],
+    },
+    "nclimate": {
+        "name": "Nature Climate Change",
+        "issn": "1758-678X",
+        "publisher": "nature",
+        # Nature journals use a different platform (Springer Nature), not Atypon.
+        # Article IDs are like "s41558-025-02345-7".
+        # PDF URLs use the article path + .pdf suffix.
+        "pdf_base_url": "https://www.nature.com/articles/{article_id}.pdf",
+        "landing_url": "https://www.nature.com/articles/{article_id}",
+        "toc_url": "https://www.nature.com/nclimate/articles?type=article",
+        "rss_urls": [
+            "https://www.nature.com/nclimate.rss",
         ],
     },
 }

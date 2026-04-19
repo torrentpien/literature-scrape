@@ -291,6 +291,18 @@ def index():
         pdf_dir = PDF_DIR / key
         pdf_count = len(list(pdf_dir.glob("*.pdf"))) if pdf_dir.exists() else 0
 
+        # Extract latest volume/issue from metadata
+        latest_vol = ""
+        latest_iss = ""
+        if articles:
+            for a in articles:
+                v = a.get("volume", "")
+                i = a.get("issue", "")
+                if v:
+                    latest_vol = v
+                    latest_iss = i
+                    break
+
         journals_info.append({
             "key": key,
             "name": info["name"],
@@ -299,6 +311,8 @@ def index():
             "article_count": len(articles),
             "pdf_count": pdf_count,
             "summary_count": summary_count,
+            "latest_vol": latest_vol,
+            "latest_iss": latest_iss,
         })
 
     return render_template("index.html", journals=journals_info)
@@ -359,6 +373,35 @@ def article_detail(journal_key: str, doi_suffix: str):
                            status=status)
 
 
+@app.route("/article/<journal_key>/<doi_suffix>/rcode")
+def article_rcode(journal_key: str, doi_suffix: str):
+    """R simulation code page for an article."""
+    if journal_key not in JOURNALS:
+        return "Journal not found", 404
+
+    journal = JOURNALS[journal_key]
+    articles = load_metadata(journal_key)
+
+    article = None
+    for a in articles:
+        if a.get("doi", "").split("/")[-1] == doi_suffix:
+            article = a
+            break
+
+    if not article:
+        return "Article not found", 404
+
+    summary_data = load_summary(journal_key, doi_suffix)
+    r_code = summary_data.get("r_simulation_code", "") if summary_data else ""
+
+    return render_template("rcode.html",
+                           journal_key=journal_key,
+                           journal=journal,
+                           article=article,
+                           doi_suffix=doi_suffix,
+                           r_code=r_code)
+
+
 # ── API routes ────────────────────────────────────────────────────────────
 
 @app.route("/api/run", methods=["POST"])
@@ -415,6 +458,46 @@ def api_summarize_only():
     thread.start()
     return jsonify({"status": "started", "mode": "summarize-only",
                     "journal": journal_key})
+
+
+@app.route("/api/check-updates/<journal_key>")
+def api_check_updates(journal_key: str):
+    """
+    Check if a journal has new articles not yet in our metadata.
+
+    Fetches the latest article list from RSS (fast) and compares DOIs
+    against the existing metadata.json. Returns new article count and titles.
+    """
+    if journal_key not in JOURNALS:
+        return jsonify({"error": "Unknown journal"}), 400
+
+    try:
+        from src.scraper import fetch_articles_rss
+        latest = fetch_articles_rss(journal_key)
+    except Exception as e:
+        return jsonify({"error": f"RSS fetch failed: {e}"}), 500
+
+    existing = load_metadata(journal_key)
+    existing_dois = {a.get("doi", "") for a in existing if a.get("doi")}
+
+    new_articles = []
+    for a in latest:
+        if a.doi and a.doi not in existing_dois:
+            new_articles.append({
+                "title": a.title,
+                "doi": a.doi,
+                "authors": a.authors[:3],
+                "publication_date": a.publication_date,
+            })
+
+    return jsonify({
+        "journal": journal_key,
+        "journal_name": JOURNALS[journal_key]["name"],
+        "rss_total": len(latest),
+        "existing_total": len(existing),
+        "new_count": len(new_articles),
+        "new_articles": new_articles[:20],
+    })
 
 
 @app.route("/api/status")
