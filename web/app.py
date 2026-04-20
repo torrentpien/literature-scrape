@@ -611,6 +611,125 @@ def api_regenerate_rcode(journal_key: str, doi_suffix: str):
     return jsonify({"status": "ok", "r_code": r_code})
 
 
+def _run_retry_downloads_bg(journal_key: str, dois: list[str]):
+    """Background task to retry downloading PDFs for specific articles."""
+    _install_web_log_handler()
+    try:
+        _update_state(
+            running=True, journal=journal_key, phase="downloading",
+            progress=5, current_title="準備重試下載...",
+            error=None, log=[]
+        )
+        _add_log(f"[重試下載] {JOURNALS[journal_key]['name']} — {len(dois)} 篇文章")
+
+        # Load metadata and filter to requested DOIs
+        articles_data = load_metadata(journal_key)
+        if not articles_data:
+            _update_state(phase="error", running=False,
+                          error="找不到 metadata，請先執行完整抓取")
+            return
+
+        from src.scraper import Article
+        from src.downloader import download_pdf
+
+        targets = []
+        for a in articles_data:
+            if a.get("doi") in dois:
+                targets.append(Article(
+                    title=a.get("title", ""),
+                    authors=a.get("authors", []),
+                    doi=a.get("doi", ""),
+                    journal=a.get("journal", ""),
+                    volume=a.get("volume", ""),
+                    issue=a.get("issue", ""),
+                    pages=a.get("pages", ""),
+                    publication_date=a.get("publication_date", ""),
+                    abstract=a.get("abstract", ""),
+                    pdf_url=a.get("pdf_url", ""),
+                    landing_url=a.get("landing_url", ""),
+                ))
+
+        if not targets:
+            _update_state(phase="error", running=False,
+                          error="找不到指定的文章 DOI")
+            return
+
+        _update_state(total_articles=len(targets), progress=10)
+        _add_log(f"找到 {len(targets)} 篇目標文章，開始重試下載")
+
+        journal_pdf_dir = PDF_DIR / journal_key
+        journal_pdf_dir.mkdir(parents=True, exist_ok=True)
+
+        succeeded = 0
+        for i, article in enumerate(targets, 1):
+            pct = 10 + int(85 * i / len(targets))
+            _update_state(current_article=i, progress=pct,
+                          current_title=f"下載中：{article.title[:50]}...")
+            _add_log(f"[{i}/{len(targets)}] {article.title[:60]}")
+            path = download_pdf(article, output_dir=journal_pdf_dir)
+            if path:
+                succeeded += 1
+            time.sleep(1)
+
+        _update_state(phase="done", progress=100, running=False,
+                      current_title=f"完成：{succeeded}/{len(targets)} 成功")
+        _add_log(f"重試完成：{succeeded}/{len(targets)} 成功")
+
+    except Exception as e:
+        logger.exception("Retry pipeline error")
+        _update_state(phase="error", running=False, error=str(e))
+        _add_log(f"錯誤：{e}")
+
+
+@app.route("/api/retry-download/<journal_key>", methods=["POST"])
+def api_retry_download(journal_key: str):
+    """
+    Retry PDF download for specific articles.
+
+    Request body:
+      { "dois": ["10.xxx/aaa", "10.xxx/bbb"] }        — retry these specific articles
+      { "dois": "all-missing" }                       — retry every article that has
+                                                        no PDF on disk
+    """
+    if journal_key not in JOURNALS:
+        return jsonify({"error": "Unknown journal"}), 400
+
+    data = request.json or {}
+    dois = data.get("dois")
+
+    # Expand "all-missing" to actual list of DOIs without PDFs
+    if dois == "all-missing":
+        articles_data = load_metadata(journal_key)
+        journal_pdf_dir = PDF_DIR / journal_key
+        missing = []
+        for a in articles_data:
+            doi = a.get("doi", "")
+            if not doi:
+                continue
+            doi_suffix = doi.split("/")[-1]
+            if journal_pdf_dir.exists():
+                matches = list(journal_pdf_dir.glob(f"{doi_suffix}*.pdf"))
+                if matches:
+                    continue
+            missing.append(doi)
+        dois = missing
+
+    if not isinstance(dois, list) or not dois:
+        return jsonify({"error": "No DOIs to retry"}), 400
+
+    with state_lock:
+        if pipeline_state["running"]:
+            return jsonify({"error": "Another pipeline is running"}), 409
+
+    thread = threading.Thread(
+        target=_run_retry_downloads_bg,
+        args=(journal_key, dois),
+        daemon=True,
+    )
+    thread.start()
+    return jsonify({"status": "started", "count": len(dois), "journal": journal_key})
+
+
 @app.route("/api/status")
 def api_status():
     """Get current pipeline status."""

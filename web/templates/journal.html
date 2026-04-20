@@ -10,6 +10,8 @@
   <p class="subtitle">ISSN: {{ journal.issn }} &middot; {{ journal.publisher | upper }}</p>
 </div>
 
+{% set missing_count = articles | selectattr('has_pdf', 'equalto', false) | list | length %}
+
 <!-- Filter bar -->
 <div class="card filter-bar">
   <div class="filter-row">
@@ -26,8 +28,29 @@
       </select>
     </div>
     <div class="filter-stats">
-      共 <strong>{{ articles | length }}</strong> 篇文章
+      共 <strong>{{ articles | length }}</strong> 篇
+      {% if missing_count > 0 %}
+       &middot; <strong>{{ missing_count }}</strong> 篇缺 PDF
+      {% endif %}
     </div>
+    {% if missing_count > 0 %}
+    <button class="btn btn-sm btn-primary"
+            onclick="retryAllMissing('{{ journal_key }}')">
+      重試所有缺 PDF 文章
+    </button>
+    {% endif %}
+  </div>
+
+  <!-- Progress bar (hidden until retry in progress) -->
+  <div id="retry-progress" class="progress-section hidden" style="margin-top:14px">
+    <div class="progress-header">
+      <span id="retry-phase" class="phase-tag">準備中</span>
+      <span id="retry-detail"></span>
+    </div>
+    <div class="progress-bar-track">
+      <div id="retry-bar" class="progress-bar-fill" style="width:0%"></div>
+    </div>
+    <div id="retry-log" class="progress-log"></div>
   </div>
 </div>
 
@@ -74,6 +97,13 @@
           查看摘要
         </a>
         {% endif %}
+
+        {% if not a.has_pdf and a.doi %}
+        <button class="btn btn-sm btn-outline"
+                onclick="retryOne('{{ journal_key }}', '{{ a.doi }}')">
+          重試下載
+        </button>
+        {% endif %}
       </div>
     </div>
 
@@ -112,5 +142,102 @@ function filterArticles() {
     row.style.display = (matchText && matchStatus) ? '' : 'none';
   });
 }
+
+// ── Retry download logic ──────────────────────────────────────────────
+
+let retryPollInterval = null;
+
+function retryOne(journalKey, doi) {
+  _startRetry(journalKey, [doi]);
+}
+
+function retryAllMissing(journalKey) {
+  if (!confirm("確定要重試所有缺 PDF 的文章嗎？\nNature 每篇需要使用瀏覽器下載，可能需要數分鐘。")) {
+    return;
+  }
+  _startRetry(journalKey, "all-missing");
+}
+
+function _startRetry(journalKey, dois) {
+  const progressSection = document.getElementById("retry-progress");
+  if (progressSection) progressSection.classList.remove("hidden");
+
+  fetch("/api/retry-download/" + journalKey, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dois: dois }),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) {
+        alert(data.error);
+        return;
+      }
+      _startRetryPolling();
+    })
+    .catch((err) => alert("啟動失敗：" + err));
+}
+
+function _startRetryPolling() {
+  if (retryPollInterval) clearInterval(retryPollInterval);
+  retryPollInterval = setInterval(_pollRetryStatus, 1000);
+}
+
+const PHASE_LABELS = {
+  fetching: "取得文章",
+  downloading: "下載 PDF",
+  summarizing: "產生摘要",
+  done: "完成",
+  error: "錯誤",
+};
+
+function _pollRetryStatus() {
+  fetch("/api/status")
+    .then((r) => r.json())
+    .then((state) => {
+      const phase = document.getElementById("retry-phase");
+      const detail = document.getElementById("retry-detail");
+      const bar = document.getElementById("retry-bar");
+      const log = document.getElementById("retry-log");
+
+      if (phase) {
+        phase.textContent = PHASE_LABELS[state.phase] || state.phase;
+        phase.className = "phase-tag phase-" + state.phase;
+      }
+      if (detail) detail.textContent = state.current_title || "";
+      if (bar) bar.style.width = state.progress + "%";
+      if (log && state.log) {
+        log.innerHTML = state.log
+          .map((l) => '<div class="log-line">' + _escapeHtml(l) + "</div>")
+          .join("");
+        log.scrollTop = log.scrollHeight;
+      }
+
+      if (!state.running) {
+        clearInterval(retryPollInterval);
+        retryPollInterval = null;
+        if (state.phase === "done") {
+          setTimeout(() => location.reload(), 1800);
+        }
+      }
+    })
+    .catch(() => {});
+}
+
+function _escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Resume polling if a retry is already running when page loads
+document.addEventListener("DOMContentLoaded", () => {
+  fetch("/api/status").then(r => r.json()).then(state => {
+    if (state.running && state.phase === "downloading") {
+      document.getElementById("retry-progress").classList.remove("hidden");
+      _startRetryPolling();
+    }
+  }).catch(() => {});
+});
 </script>
 {% endblock %}
