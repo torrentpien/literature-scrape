@@ -10,3 +10,6 @@ markdown>=3.5.0
 # curl_cffi is REQUIRED for downloading from Cloudflare-protected
 # publishers (SAGE, Wiley, Taylor & Francis, etc.)
 curl_cffi>=0.7.0
+# playwright is REQUIRED for JS-challenge sites (Springer Nature).
+# After pip install, run: playwright install chromium
+playwright>=1.40.0

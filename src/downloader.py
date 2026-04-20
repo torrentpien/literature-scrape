@@ -26,6 +26,14 @@ except ImportError:
     cffi_requests = None
     HAS_CURL_CFFI = False
 
+# Try to use playwright for JS-challenge sites (Springer Nature)
+try:
+    from playwright.sync_api import sync_playwright  # type: ignore
+    HAS_PLAYWRIGHT = True
+except ImportError:
+    sync_playwright = None
+    HAS_PLAYWRIGHT = False
+
 from config import (
     DOWNLOAD_DELAY,
     JOURNALS,
@@ -169,6 +177,8 @@ def _describe_html(content: bytes) -> str:
     text = content[:3000].decode("utf-8", errors="replace")
     if _is_cloudflare(content):
         return "CLOUDFLARE CHALLENGE (install curl_cffi to bypass)"
+    if _is_js_challenge(content):
+        return "JS CHALLENGE (will try browser fallback)"
     if "Access Denied" in text or "access-denied" in text.lower():
         return "Access denied page"
     if "Sign in" in text or "Login" in text or "log in" in text.lower():
@@ -179,6 +189,96 @@ def _describe_html(content: bytes) -> str:
     if title_match:
         return f"HTML page: '{title_match.group(1).strip()[:80]}'"
     return f"HTML page ({len(content)} bytes)"
+
+
+def _is_js_challenge(content: bytes) -> bool:
+    """Detect JS-based bot challenges (Springer Nature 'Client Challenge', etc.)."""
+    text = content[:5000].decode("utf-8", errors="replace").lower()
+    markers = ["client challenge", "challenge.js", "bot detection",
+               "please enable javascript", "browser verification"]
+    return any(m in text for m in markers)
+
+
+def _download_with_browser(pdf_url: str, landing_url: str,
+                            output_path: Path) -> bool:
+    """
+    Download a PDF using a real headless browser (Playwright).
+
+    Used as fallback when curl_cffi fails due to JS challenges
+    (e.g., Springer Nature's "Client Challenge").
+
+    Flow:
+    1. Launch headless Chromium
+    2. Visit landing page first (solve JS challenge, get cookies)
+    3. Navigate to PDF URL — browser handles redirects, JS, cookies
+    4. Intercept the PDF response and save to disk
+    """
+    if not HAS_PLAYWRIGHT:
+        logger.error(
+            "playwright not installed — cannot solve JS challenge. "
+            "Run: pip install playwright && playwright install chromium"
+        )
+        return False
+
+    logger.info("  Attempting browser-based download (playwright)...")
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                accept_downloads=True,
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                ),
+            )
+            page = context.new_page()
+
+            # Step 1: Visit landing page to solve JS challenge
+            if landing_url:
+                logger.info(f"  Browser: visiting {landing_url}")
+                page.goto(landing_url, wait_until="networkidle", timeout=30000)
+                time.sleep(2)
+                cookies = context.cookies()
+                logger.info(f"  Browser: got {len(cookies)} cookies after challenge")
+
+            # Step 2: Try to download the PDF
+            logger.info(f"  Browser: requesting {pdf_url}")
+
+            # Use the API request context (inherits browser cookies)
+            api = context.request
+            resp = api.get(pdf_url, timeout=60000)
+            ct = resp.headers.get("content-type", "")
+
+            logger.info(f"  Browser: HTTP {resp.status} | {ct} | {len(resp.body())} bytes")
+
+            if "pdf" in ct or resp.body()[:5] == b"%PDF-":
+                output_path.write_bytes(resp.body())
+                size_mb = len(resp.body()) / (1024 * 1024)
+                logger.info(f"  Browser: SAVED {output_path.name} ({size_mb:.1f} MB)")
+                browser.close()
+                return True
+
+            # Didn't get PDF — might need to navigate directly
+            logger.info("  Browser: API request didn't return PDF, trying page navigation...")
+            resp2 = page.goto(pdf_url, wait_until="networkidle", timeout=30000)
+            if resp2:
+                ct2 = resp2.headers.get("content-type", "")
+                body = resp2.body()
+                if "pdf" in ct2 or body[:5] == b"%PDF-":
+                    output_path.write_bytes(body)
+                    logger.info(f"  Browser: SAVED via navigation {output_path.name}")
+                    browser.close()
+                    return True
+                logger.warning(f"  Browser: still got HTML ({ct2}, {len(body)} bytes)")
+
+            browser.close()
+
+    except Exception as e:
+        logger.error(f"  Browser download failed: {type(e).__name__}: {e}")
+
+    return False
 
 
 def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
@@ -198,10 +298,10 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
         logger.info(f"Already downloaded: {output_path.name}")
         return output_path
 
-    if not HAS_CURL_CFFI:
+    if not HAS_CURL_CFFI and not HAS_PLAYWRIGHT:
         logger.error(
-            "curl_cffi not installed — cannot bypass Cloudflare. "
-            "Install with: pip install curl_cffi"
+            "Neither curl_cffi nor playwright installed. "
+            "Run: pip install curl_cffi playwright && playwright install chromium"
         )
         return None
 
@@ -211,35 +311,41 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
         logger.warning(f"No candidate PDF URLs for: {article.title}")
         return None
 
-    for attempt in range(1, MAX_RETRIES + 1):
-        logger.info(f"Download attempt {attempt}/{MAX_RETRIES}: {article.title[:60]}...")
+    js_challenge_detected = False
 
-        # Use a fresh curl_cffi session per attempt (clean cookies)
-        session = cffi_requests.Session()
+    if not HAS_CURL_CFFI:
+        # Skip curl_cffi attempts, go straight to browser
+        js_challenge_detected = True
+    else:
+        for attempt in range(1, MAX_RETRIES + 1):
+            logger.info(f"Download attempt {attempt}/{MAX_RETRIES}: {article.title[:60]}...")
 
-        # Step 1: Visit landing page to warm up cookies
-        if article.landing_url and attempt == 1:
-            try:
-                logger.info(f"  Warming session: {article.landing_url}")
-                for target in IMPERSONATE_TARGETS:
-                    try:
-                        resp = session.get(
-                            article.landing_url,
-                            impersonate=target,
-                            timeout=REQUEST_TIMEOUT,
-                            allow_redirects=True,
-                        )
-                        cookies = dict(session.cookies) if hasattr(session.cookies, 'keys') else {}
-                        logger.info(f"  Landing ({target}): HTTP {resp.status_code}, "
-                                     f"cookies={list(cookies.keys())}")
-                        if resp.status_code == 200:
-                            break
-                    except Exception as e:
-                        logger.info(f"  Landing ({target}): {e}")
-                        continue
-                time.sleep(1)
-            except Exception as e:
-                logger.warning(f"  Landing page error: {e}")
+            # Use a fresh curl_cffi session per attempt (clean cookies)
+            session = cffi_requests.Session()
+
+            # Step 1: Visit landing page to warm up cookies
+            if article.landing_url and attempt == 1:
+                try:
+                    logger.info(f"  Warming session: {article.landing_url}")
+                    for target in IMPERSONATE_TARGETS:
+                        try:
+                            resp = session.get(
+                                article.landing_url,
+                                impersonate=target,
+                                timeout=REQUEST_TIMEOUT,
+                                allow_redirects=True,
+                            )
+                            cookies = dict(session.cookies) if hasattr(session.cookies, 'keys') else {}
+                            logger.info(f"  Landing ({target}): HTTP {resp.status_code}, "
+                                         f"cookies={list(cookies.keys())}")
+                            if resp.status_code == 200:
+                                break
+                        except Exception as e:
+                            logger.info(f"  Landing ({target}): {e}")
+                            continue
+                    time.sleep(1)
+                except Exception as e:
+                    logger.warning(f"  Landing page error: {e}")
 
         # Step 2: Try each PDF URL
         for url in candidate_urls:
@@ -270,6 +376,11 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
                             "Ensure you are on NCCU campus (140.119.x.x) or VPN."
                         )
                         return None
+                    # Detect JS challenges (Nature "Client Challenge", etc.)
+                    if _is_js_challenge(resp.content):
+                        js_challenge_detected = True
+                        logger.info("  JS challenge detected — will try browser fallback")
+                        break  # exit URL loop → fall through to playwright
                     continue
 
                 if resp.status_code == 403:
@@ -294,12 +405,26 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
                 logger.warning(f"  Request error: {type(e).__name__}: {e}")
                 continue
 
-        if attempt < MAX_RETRIES:
-            delay = DOWNLOAD_DELAY * attempt
-            logger.info(f"  Waiting {delay}s before retry...")
-            time.sleep(delay)
+            if js_challenge_detected:
+                break  # exit retry loop → fall through to playwright
 
-    logger.error(f"Failed after {MAX_RETRIES} attempts: {article.title[:60]}")
+            if attempt < MAX_RETRIES:
+                delay = DOWNLOAD_DELAY * attempt
+                logger.info(f"  Waiting {delay}s before retry...")
+                time.sleep(delay)
+
+        if not js_challenge_detected:
+            logger.error(f"Failed after {MAX_RETRIES} attempts: {article.title[:60]}")
+            return None
+
+    # ── Browser fallback for JS challenges (Nature, etc.) ────────────────
+    if js_challenge_detected:
+        pdf_url = candidate_urls[0] if candidate_urls else ""
+        if _download_with_browser(pdf_url, article.landing_url, output_path):
+            return output_path
+        logger.error(f"Browser fallback also failed: {article.title[:60]}")
+        return None
+
     return None
 
 
