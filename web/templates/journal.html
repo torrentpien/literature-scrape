@@ -148,6 +148,11 @@ function filterArticles() {
 let retryPollInterval = null;
 
 function retryOne(journalKey, doi) {
+  // Disable the clicked button and show feedback
+  if (event && event.target) {
+    event.target.disabled = true;
+    event.target.textContent = "下載中...";
+  }
   _startRetry(journalKey, [doi]);
 }
 
@@ -183,7 +188,7 @@ function _startRetryPolling() {
   retryPollInterval = setInterval(_pollRetryStatus, 1000);
 }
 
-const PHASE_LABELS = {
+const RETRY_PHASE_LABELS = {
   fetching: "取得文章",
   downloading: "下載 PDF",
   summarizing: "產生摘要",
@@ -201,7 +206,7 @@ function _pollRetryStatus() {
       const log = document.getElementById("retry-log");
 
       if (phase) {
-        phase.textContent = PHASE_LABELS[state.phase] || state.phase;
+        phase.textContent = RETRY_PHASE_LABELS[state.phase] || state.phase;
         phase.className = "phase-tag phase-" + state.phase;
       }
       if (detail) detail.textContent = state.current_title || "";
