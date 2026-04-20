@@ -200,18 +200,20 @@ def _is_js_challenge(content: bytes) -> bool:
 
 
 def _download_with_browser(pdf_url: str, landing_url: str,
-                            output_path: Path) -> bool:
+                            output_path: Path,
+                            extra_pdf_urls: list[str] | None = None) -> bool:
     """
     Download a PDF using a real headless browser (Playwright).
 
     Used as fallback when curl_cffi fails due to JS challenges
     (e.g., Springer Nature's "Client Challenge").
 
-    Flow:
-    1. Launch headless Chromium
-    2. Visit landing page first (solve JS challenge, get cookies)
-    3. Navigate to PDF URL — browser handles redirects, JS, cookies
-    4. Intercept the PDF response and save to disk
+    Strategy (in order):
+    1. Visit landing page, solve JS challenge, grab cookies
+    2. Try API request to each PDF URL candidate (uses browser cookies)
+    3. Try direct page.goto() on PDF URL (follows JS redirects)
+    4. Try clicking any "Download PDF" / "Get PDF" link on the landing page
+       and capture the download event
     """
     if not HAS_PLAYWRIGHT:
         logger.error(
@@ -221,6 +223,11 @@ def _download_with_browser(pdf_url: str, landing_url: str,
         return False
 
     logger.info("  Attempting browser-based download (playwright)...")
+
+    all_pdf_urls = [pdf_url]
+    for u in (extra_pdf_urls or []):
+        if u and u not in all_pdf_urls:
+            all_pdf_urls.append(u)
 
     try:
         with sync_playwright() as p:
@@ -235,43 +242,90 @@ def _download_with_browser(pdf_url: str, landing_url: str,
             )
             page = context.new_page()
 
-            # Step 1: Visit landing page to solve JS challenge
+            # ── Step 1: Solve landing-page JS challenge ────────────────
             if landing_url:
                 logger.info(f"  Browser: visiting {landing_url}")
-                page.goto(landing_url, wait_until="networkidle", timeout=30000)
-                time.sleep(2)
+                try:
+                    page.goto(landing_url, wait_until="networkidle", timeout=60000)
+                except Exception as e:
+                    logger.warning(f"  Landing goto failed: {e}")
+                # Give it a moment for late-loading challenges
+                time.sleep(3)
                 cookies = context.cookies()
                 logger.info(f"  Browser: got {len(cookies)} cookies after challenge")
 
-            # Step 2: Try to download the PDF
-            logger.info(f"  Browser: requesting {pdf_url}")
+            # ── Step 2: API request to each candidate PDF URL ──────────
+            for u in all_pdf_urls:
+                try:
+                    logger.info(f"  Browser API: {u}")
+                    resp = context.request.get(u, timeout=90000)
+                    ct = resp.headers.get("content-type", "")
+                    body = resp.body()
+                    logger.info(f"  -> HTTP {resp.status} | {ct} | {len(body)} bytes")
 
-            # Use the API request context (inherits browser cookies)
-            api = context.request
-            resp = api.get(pdf_url, timeout=60000)
-            ct = resp.headers.get("content-type", "")
+                    if "pdf" in ct or body[:5] == b"%PDF-":
+                        output_path.write_bytes(body)
+                        size_mb = len(body) / (1024 * 1024)
+                        logger.info(f"  Browser: SAVED {output_path.name} ({size_mb:.1f} MB)")
+                        browser.close()
+                        return True
+                except Exception as e:
+                    logger.info(f"  API request error: {e}")
 
-            logger.info(f"  Browser: HTTP {resp.status} | {ct} | {len(resp.body())} bytes")
+            # ── Step 3: Page navigation to each candidate PDF URL ──────
+            for u in all_pdf_urls:
+                try:
+                    logger.info(f"  Browser navigate: {u}")
+                    # Listen for downloads triggered by navigation
+                    with page.expect_download(timeout=30000) as dl_info:
+                        try:
+                            page.goto(u, timeout=45000)
+                        except Exception:
+                            pass  # navigation may throw due to download
+                    try:
+                        download = dl_info.value
+                        download.save_as(str(output_path))
+                        logger.info(f"  Browser: saved via download event: {output_path.name}")
+                        browser.close()
+                        return True
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.info(f"  Page goto error: {e}")
 
-            if "pdf" in ct or resp.body()[:5] == b"%PDF-":
-                output_path.write_bytes(resp.body())
-                size_mb = len(resp.body()) / (1024 * 1024)
-                logger.info(f"  Browser: SAVED {output_path.name} ({size_mb:.1f} MB)")
-                browser.close()
-                return True
-
-            # Didn't get PDF — might need to navigate directly
-            logger.info("  Browser: API request didn't return PDF, trying page navigation...")
-            resp2 = page.goto(pdf_url, wait_until="networkidle", timeout=30000)
-            if resp2:
-                ct2 = resp2.headers.get("content-type", "")
-                body = resp2.body()
-                if "pdf" in ct2 or body[:5] == b"%PDF-":
-                    output_path.write_bytes(body)
-                    logger.info(f"  Browser: SAVED via navigation {output_path.name}")
-                    browser.close()
-                    return True
-                logger.warning(f"  Browser: still got HTML ({ct2}, {len(body)} bytes)")
+            # ── Step 4: Click "Download PDF" link on landing page ──────
+            if landing_url:
+                try:
+                    logger.info("  Browser: looking for Download PDF link on landing page...")
+                    page.goto(landing_url, wait_until="networkidle", timeout=45000)
+                    time.sleep(2)
+                    # Common selectors for PDF download links
+                    selectors = [
+                        "a[data-track-action='download pdf']",
+                        "a[data-track='Download PDF']",
+                        "a:has-text('Download PDF')",
+                        "a:has-text('Get PDF')",
+                        "a[href$='.pdf']",
+                    ]
+                    link = None
+                    for sel in selectors:
+                        try:
+                            link = page.query_selector(sel)
+                            if link:
+                                logger.info(f"  Found PDF link with selector: {sel}")
+                                break
+                        except Exception:
+                            continue
+                    if link:
+                        with page.expect_download(timeout=60000) as dl_info:
+                            link.click()
+                        download = dl_info.value
+                        download.save_as(str(output_path))
+                        logger.info(f"  Browser: saved via click: {output_path.name}")
+                        browser.close()
+                        return True
+                except Exception as e:
+                    logger.info(f"  Click flow failed: {e}")
 
             browser.close()
 
@@ -420,7 +474,9 @@ def download_pdf(article: Article, output_dir: Path = PDF_DIR) -> Path | None:
     # ── Browser fallback for JS challenges (Nature, etc.) ────────────────
     if js_challenge_detected:
         pdf_url = candidate_urls[0] if candidate_urls else ""
-        if _download_with_browser(pdf_url, article.landing_url, output_path):
+        extras = candidate_urls[1:] if len(candidate_urls) > 1 else []
+        if _download_with_browser(pdf_url, article.landing_url, output_path,
+                                    extra_pdf_urls=extras):
             return output_path
         logger.error(f"Browser fallback also failed: {article.title[:60]}")
         return None
