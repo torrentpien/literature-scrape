@@ -766,4 +766,8 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # Disable Flask's auto-reloader: Windows watchdog sometimes detects
+    # phantom file changes (e.g., when Playwright launches Chromium),
+    # which would kill the background download/summarization thread.
+    # Debug error pages still work without the reloader.
+    app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False, threaded=True)

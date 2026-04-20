@@ -150,14 +150,24 @@ def _cffi_get(url: str, timeout: int = REQUEST_TIMEOUT, allow_redirects: bool = 
 
 def _cffi_session_get(session, url: str, **kwargs):
     """GET using a curl_cffi session, trying multiple impersonate targets."""
+    last_resp = None
+    last_err = None
     for target in IMPERSONATE_TARGETS:
         try:
             resp = session.get(url, impersonate=target, **kwargs)
+            last_resp = resp
             if resp.status_code != 403 or not _is_cloudflare(resp.content):
                 return resp
-        except Exception:
+        except Exception as e:
+            last_err = e
+            logger.debug(f"    ({target}) session.get error: {e}")
             continue
-    return resp  # type: ignore
+    if last_resp is not None:
+        return last_resp
+    # All attempts raised; re-raise the last one so the caller knows
+    if last_err:
+        raise last_err
+    raise RuntimeError("All impersonation targets failed")
 
 
 def _is_cloudflare(content: bytes) -> bool:
