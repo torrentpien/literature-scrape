@@ -64,8 +64,35 @@ def _update_state(**kwargs):
 def _add_log(msg: str):
     with state_lock:
         pipeline_state["log"].append(msg)
-        if len(pipeline_state["log"]) > 100:
-            pipeline_state["log"] = pipeline_state["log"][-50:]
+        if len(pipeline_state["log"]) > 200:
+            pipeline_state["log"] = pipeline_state["log"][-100:]
+
+
+class _WebLogHandler(logging.Handler):
+    """Capture log records from worker modules and push to the web UI log."""
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            _add_log(msg)
+        except Exception:
+            pass
+
+
+def _install_web_log_handler():
+    """Attach a handler that mirrors downloader/scraper/summarizer logs
+    to the web UI progress panel. Installs once (idempotent)."""
+    root = logging.getLogger()
+    for h in root.handlers:
+        if isinstance(h, _WebLogHandler):
+            return  # already installed
+    handler = _WebLogHandler()
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+    # Only attach to the src.* loggers so we don't flood with Flask/werkzeug
+    for name in ("src.scraper", "src.downloader", "src.summarizer"):
+        logger_ = logging.getLogger(name)
+        logger_.addHandler(handler)
+        logger_.setLevel(logging.INFO)
 
 
 # ── Data loading helpers ──────────────────────────────────────────────────
@@ -141,6 +168,9 @@ def run_pipeline_bg(journal_key: str, backend: str = "openai", lang: str = "zh",
     """
     import config
     config.SUMMARIZER_BACKEND = backend
+
+    # Mirror scraper/downloader/summarizer logs into the web UI progress panel
+    _install_web_log_handler()
 
     try:
         journal_pdf_dir = PDF_DIR / journal_key

@@ -378,9 +378,15 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
         )
         # Sometimes DOI is embedded in the link URL
         if not doi and link:
+            # Atypon pattern: /doi/..., /doi/abs/..., /doi/pdf/... or doi.org/...
             m = re.search(r'(?:doi/(?:abs/|full/|pdf/)?|doi\.org/)(10\.\d+/[^?\s&#]+)', link)
             if m:
                 doi = m.group(1)
+            # Nature pattern: /articles/{article_id} — DOI is 10.1038/{article_id}
+            if not doi:
+                m = re.search(r'nature\.com/articles/([\w\-]+)', link)
+                if m:
+                    doi = f"10.1038/{m.group(1)}"
 
         # Clean "doi:" prefix if present
         doi = re.sub(r'^doi:\s*', '', doi).strip()
