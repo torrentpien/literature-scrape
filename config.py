@@ -124,6 +124,31 @@ JOURNALS = {
             "https://academic.oup.com/sf/rss",
         ],
     },
+    "envpol": {
+        "name": "Environmental Politics",
+        "issn": "0964-4016",
+        "publisher": "tandf",
+        # Taylor & Francis / Atypon — same URL patterns as JCC
+        "pdf_base_url": "https://www.tandfonline.com/doi/pdf/{doi}",
+        "landing_url": "https://www.tandfonline.com/doi/{doi}",
+        "toc_url": "https://www.tandfonline.com/toc/fenp20/current",
+        "rss_urls": [
+            "https://www.tandfonline.com/action/showFeed?jc=fenp20&type=etoc&feed=rss_2_0",
+            "https://www.tandfonline.com/action/showFeed?jc=fenp20&type=etoc&feed=rss_1_0",
+        ],
+    },
+    "gec": {
+        "name": "Global Environmental Change",
+        "issn": "0959-3780",
+        "publisher": "elsevier",
+        # Elsevier / ScienceDirect uses a different platform.
+        # PDF URL: /science/article/pii/{PII}/pdfft (PII is the DOI suffix,
+        # e.g., S0959378024001560). Also accessible via doi.org redirect.
+        "pdf_base_url": "https://www.sciencedirect.com/science/article/pii/{article_id}/pdfft",
+        "landing_url": "https://doi.org/{doi}",
+        "toc_url": "https://www.sciencedirect.com/journal/global-environmental-change/latest",
+        "rss_urls": [],
+    },
 }
 
 # ── API settings ──────────────────────────────────────────────────────────

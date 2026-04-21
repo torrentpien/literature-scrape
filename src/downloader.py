@@ -99,11 +99,19 @@ def _pdf_candidates(article: Article) -> list[str]:
     is_nature = "nature.com" in base_host
     is_cambridge = "cambridge.org" in base_host
     is_oup = "oup.com" in base_host
+    is_elsevier = "sciencedirect.com" in base_host or "elsevier.com" in base_host
 
     if is_nature:
         patterns = [
             f"/articles/{article_id}.pdf",
             f"/articles/{article_id}",
+        ]
+    elif is_elsevier:
+        # Elsevier/ScienceDirect: PII-based PDF URL
+        # The article_id from DOI (e.g., S0959378024001560) is the PII.
+        patterns = [
+            f"/science/article/pii/{article_id}/pdfft",
+            f"/science/article/pii/{article_id}/pdf",
         ]
     elif is_cambridge:
         patterns = [
@@ -327,7 +335,7 @@ def _download_with_browser(pdf_url: str, landing_url: str,
                     page.goto(landing_url, wait_until="networkidle", timeout=45000)
                     time.sleep(2)
                     # PDF download link selectors across publishers:
-                    # Nature, SAGE, T&F, Cambridge Core, OUP Silverchair
+                    # Nature, SAGE, T&F, Cambridge Core, OUP, Elsevier
                     selectors = [
                         "a[data-track-action='download pdf']",
                         "a[data-track='Download PDF']",
@@ -341,6 +349,11 @@ def _download_with_browser(pdf_url: str, landing_url: str,
                         # OUP Silverchair
                         "a.article-pdfLink",
                         "a[class*='pdf']",
+                        # Elsevier / ScienceDirect
+                        "a.pdf-download",
+                        "a[class*='PdfLink']",
+                        "a[aria-label*='PDF']",
+                        "a[href*='pdfft']",
                         # Generic fallback
                         "a[href$='.pdf']",
                         "a[href*='/pdf/']",

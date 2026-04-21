@@ -387,6 +387,11 @@ def fetch_articles_rss(journal_key: str) -> list[Article]:
                 m = re.search(r'nature\.com/articles/([\w\-]+)', link)
                 if m:
                     doi = f"10.1038/{m.group(1)}"
+            # ScienceDirect: /science/article/pii/{PII} — DOI is 10.1016/{PII}
+            if not doi:
+                m = re.search(r'sciencedirect\.com/science/article/pii/(S\w+)', link)
+                if m:
+                    doi = f"10.1016/{m.group(1)}"
 
         # Clean "doi:" prefix if present
         doi = re.sub(r'^doi:\s*', '', doi).strip()
