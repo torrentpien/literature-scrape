@@ -508,17 +508,16 @@ def api_check_updates(journal_key: str):
     """
     Check if a journal has new articles not yet in our metadata.
 
-    Fetches the latest article list from RSS (fast) and compares DOIs
-    against the existing metadata.json. Returns new article count and titles.
+    Uses the full discovery pipeline (RSS → CrossRef → OpenAlex) so it
+    works for all journals, including those without RSS feeds.
     """
     if journal_key not in JOURNALS:
         return jsonify({"error": "Unknown journal"}), 400
 
     try:
-        from src.scraper import fetch_articles_rss
-        latest = fetch_articles_rss(journal_key)
+        latest = fetch_latest_issue(journal_key, max_articles=25)
     except Exception as e:
-        return jsonify({"error": f"RSS fetch failed: {e}"}), 500
+        return jsonify({"error": f"Article fetch failed: {e}"}), 500
 
     existing = load_metadata(journal_key)
     existing_dois = {a.get("doi", "") for a in existing if a.get("doi")}
