@@ -69,14 +69,59 @@ JOURNALS = {
         "name": "Nature Climate Change",
         "issn": "1758-678X",
         "publisher": "nature",
-        # Nature journals use a different platform (Springer Nature), not Atypon.
-        # Article IDs are like "s41558-025-02345-7".
-        # PDF URLs use the article path + .pdf suffix.
         "pdf_base_url": "https://www.nature.com/articles/{article_id}.pdf",
         "landing_url": "https://www.nature.com/articles/{article_id}",
         "toc_url": "https://www.nature.com/nclimate/articles?type=article",
         "rss_urls": [
             "https://www.nature.com/nclimate.rss",
+        ],
+    },
+    "jcc": {
+        "name": "Journal of Contemporary China",
+        "issn": "1067-0564",
+        "publisher": "tandf",
+        # Taylor & Francis uses Atypon — same URL patterns as SAGE/Chicago.
+        "pdf_base_url": "https://www.tandfonline.com/doi/pdf/{doi}",
+        "landing_url": "https://www.tandfonline.com/doi/{doi}",
+        "toc_url": "https://www.tandfonline.com/toc/cjcc20/current",
+        "rss_urls": [
+            "https://www.tandfonline.com/action/showFeed?jc=cjcc20&type=etoc&feed=rss_2_0",
+            "https://www.tandfonline.com/action/showFeed?jc=cjcc20&type=etoc&feed=rss_1_0",
+        ],
+    },
+    "chinaq": {
+        "name": "The China Quarterly",
+        "issn": "0305-7410",
+        "publisher": "cambridge",
+        # Cambridge Core has complex PDF URLs; we rely on doi.org redirect
+        # for landing and playwright "Download PDF" click for the actual PDF.
+        "pdf_base_url": "https://www.cambridge.org/core/services/aop-cambridge-core/content/view/{article_id}",
+        "landing_url": "https://doi.org/{doi}",
+        "toc_url": "https://www.cambridge.org/core/journals/china-quarterly/latest-issue",
+        "rss_urls": [],
+    },
+    "socprob": {
+        "name": "Social Problems",
+        "issn": "0037-7791",
+        "publisher": "oup",
+        # OUP Silverchair: PDF URLs are complex (include vol/issue/page).
+        # We use doi.org landing + playwright click for PDF.
+        "pdf_base_url": "https://academic.oup.com/socpro/article-pdf/doi/{doi}",
+        "landing_url": "https://doi.org/{doi}",
+        "toc_url": "https://academic.oup.com/socpro/issue",
+        "rss_urls": [
+            "https://academic.oup.com/socpro/rss",
+        ],
+    },
+    "socforces": {
+        "name": "Social Forces",
+        "issn": "0037-7732",
+        "publisher": "oup",
+        "pdf_base_url": "https://academic.oup.com/sf/article-pdf/doi/{doi}",
+        "landing_url": "https://doi.org/{doi}",
+        "toc_url": "https://academic.oup.com/sf/issue",
+        "rss_urls": [
+            "https://academic.oup.com/sf/rss",
         ],
     },
 }

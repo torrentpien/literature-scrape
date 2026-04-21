@@ -68,12 +68,14 @@ def _pdf_candidates(article: Article) -> list[str]:
     """
     Build PDF URL candidates for an article from its metadata.
 
-    Supports two platform types:
+    Supports multiple platform types:
     - Atypon (SAGE, Chicago, T&F, Wiley): /doi/pdf/{doi}, /doi/epdf/...
     - Springer Nature: /articles/{article_id}.pdf
+    - Cambridge Core: /core/services/aop-cambridge-core/content/view/{PII}
+    - OUP Silverchair: /article-pdf/doi/{doi} (may not work directly)
 
-    Derives the host from the article's existing URLs so this works
-    for any publisher automatically.
+    For Cambridge/OUP where direct PDF URLs are unreliable, the
+    playwright fallback's "click Download PDF" strategy handles it.
     """
     urls: list[str] = []
     if article.pdf_url:
@@ -82,36 +84,51 @@ def _pdf_candidates(article: Article) -> list[str]:
     # Derive publisher host from existing URLs
     base_host = ""
     for u in (article.pdf_url, article.landing_url):
-        if u:
+        if u and not u.startswith("https://doi.org"):
             m = re.match(r"(https?://[^/]+)", u)
             if m:
                 base_host = m.group(1)
                 break
 
-    if not article.doi or not base_host:
+    if not article.doi:
         return urls
 
     article_id = article.doi.split("/", 1)[-1] if "/" in article.doi else article.doi
 
     # Detect platform type from host
     is_nature = "nature.com" in base_host
+    is_cambridge = "cambridge.org" in base_host
+    is_oup = "oup.com" in base_host
 
     if is_nature:
-        # Springer Nature URL patterns
         patterns = [
             f"/articles/{article_id}.pdf",
             f"/articles/{article_id}",
         ]
-    else:
-        # Atypon URL patterns (SAGE, Chicago, T&F, Wiley)
+    elif is_cambridge:
+        patterns = [
+            f"/core/services/aop-cambridge-core/content/view/{article_id}",
+        ]
+    elif is_oup:
+        # OUP's direct PDF URL is complex; try a DOI-based path (may redirect)
+        patterns = [
+            f"/article-pdf/doi/{article.doi}",
+        ]
+    elif base_host:
+        # Atypon (SAGE, Chicago, T&F, Wiley)
         patterns = [
             f"/doi/pdf/{article.doi}",
             f"/doi/epdf/{article.doi}",
             f"/doi/pdfdirect/{article.doi}",
         ]
+    else:
+        patterns = []
 
     for pattern in patterns:
-        candidate = f"{base_host}{pattern}"
+        if base_host:
+            candidate = f"{base_host}{pattern}"
+        else:
+            candidate = pattern
         if candidate not in urls:
             urls.append(candidate)
 
@@ -309,13 +326,24 @@ def _download_with_browser(pdf_url: str, landing_url: str,
                     logger.info("  Browser: looking for Download PDF link on landing page...")
                     page.goto(landing_url, wait_until="networkidle", timeout=45000)
                     time.sleep(2)
-                    # Common selectors for PDF download links
+                    # PDF download link selectors across publishers:
+                    # Nature, SAGE, T&F, Cambridge Core, OUP Silverchair
                     selectors = [
                         "a[data-track-action='download pdf']",
                         "a[data-track='Download PDF']",
                         "a:has-text('Download PDF')",
                         "a:has-text('Get PDF')",
+                        "a:has-text('View PDF')",
+                        "a:has-text('Full Text PDF')",
+                        # Cambridge Core
+                        "a.pdf-link",
+                        "a[data-test='pdf-link']",
+                        # OUP Silverchair
+                        "a.article-pdfLink",
+                        "a[class*='pdf']",
+                        # Generic fallback
                         "a[href$='.pdf']",
+                        "a[href*='/pdf/']",
                     ]
                     link = None
                     for sel in selectors:
